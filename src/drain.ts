@@ -7,7 +7,7 @@ import { DiskFullError } from './ingest/ingest.js';
 import { runPipeline } from './pipeline.js';
 import { isQuotaError } from './youtube/upload.js';
 
-export type StopReason = 'complete' | 'quota' | 'maxReels' | 'disk' | 'error';
+export type StopReason = 'complete' | 'quota' | 'deferred' | 'maxReels' | 'disk' | 'error';
 
 export interface DrainResult extends BackfillStats {
   reels: number;
@@ -56,6 +56,17 @@ export async function drainHistory(client: Client, options: DrainOptions = {}): 
       const result = await runPipeline('threshold');
       if (result.status === 'uploaded' || result.status === 'compiled') reels++;
       report();
+
+      // The upload was deferred — almost always quota. Compiling more reels now would
+      // just queue more videos behind the same wall, so stop and let the retry sweep
+      // drain them once the quota resets.
+      if (result.status === 'deferred') {
+        stoppedBy = 'deferred';
+        detail =
+          'a reel is built but the upload was deferred (usually the daily quota). It uploads automatically once the quota resets — no need to re-run for it';
+        return false;
+      }
+
       return true;
     } catch (err) {
       if (isQuotaError(err)) {
@@ -87,6 +98,7 @@ export async function drainHistory(client: Client, options: DrainOptions = {}): 
     if (stoppedBy === 'complete' && countPending() > 0 && reels < maxReels) {
       const result = await runPipeline('manual');
       if (result.status === 'uploaded' || result.status === 'compiled') reels++;
+      if (result.status === 'deferred') stoppedBy = 'deferred';
     }
   } catch (err) {
     if (err instanceof DiskFullError) {

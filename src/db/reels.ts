@@ -32,6 +32,25 @@ export function completedReelCount(): number {
   return row?.n ?? 0;
 }
 
+/** Built reels whose upload has not succeeded and whose backoff has elapsed. */
+export function dueForUpload(now: string): ReelRow[] {
+  return db
+    .prepare(
+      `SELECT * FROM reels
+       WHERE status = 'pending_upload'
+         AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+       ORDER BY id`,
+    )
+    .all(now) as ReelRow[];
+}
+
+export function pendingUploadCount(): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM reels WHERE status = 'pending_upload'")
+    .get() as { n: number } | undefined;
+  return row?.n ?? 0;
+}
+
 /** Reels left mid-flight by a crash or redeploy — their clips need releasing. */
 export function unfinishedReels(): ReelRow[] {
   return db

@@ -7,7 +7,7 @@ import { hasYtDlp } from './ingest/download.js';
 import { beat } from './heartbeat.js';
 import { startHttpServer } from './http.js';
 import { recoverInterruptedJob, startJobRunner } from './jobs.js';
-import { isRunning, recoverInterruptedReels } from './pipeline.js';
+import { isRunning, recoverInterruptedReels, retryPendingUploads } from './pipeline.js';
 import { cleanStaleWorkFiles } from './video/compile.js';
 import { maybeRunOnThreshold, startScheduler } from './scheduler/index.js';
 import { db } from './db/index.js';
@@ -54,6 +54,11 @@ async function main(): Promise<void> {
   // Long-running jobs (the history backfill) run here rather than in a terminal
   // session, so they survive disconnects and log to the container like everything else.
   startJobRunner(client);
+
+  // A reel deferred by a quota failure yesterday should go out without being asked.
+  void retryPendingUploads().catch((err) =>
+    logger.error({ err: (err as Error).message }, 'startup upload retry failed'),
+  );
 
   logger.info('ready');
 }

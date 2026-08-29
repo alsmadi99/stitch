@@ -295,6 +295,40 @@ Two limits are enforced in code rather than left to fail silently:
 - **Tags** are added until the combined 500-character budget runs out, then the rest
   are dropped with a warning.
 
+## When an upload fails
+
+A failed upload does not throw the video away. Compiling twenty clips takes tens of
+minutes of CPU; a quota error says nothing about the video, only about the transport,
+so re-encoding it would be pure waste.
+
+Instead the reel is kept on disk with status `pending_upload`, its clips stay attached
+to it, and the upload is retried on a schedule. Every hour the bot sweeps for reels
+whose backoff has elapsed, and it sweeps once more at startup — so a reel deferred
+overnight by a quota exhaustion goes out on its own the next morning, with no command
+to run.
+
+| Failure                                     | Retried | Backoff                          |
+| ------------------------------------------- | ------- | -------------------------------- |
+| `quotaExceeded`, `dailyLimitExceeded`        | yes     | 6 hours (quota resets daily)     |
+| 5xx, `ECONNRESET`, timeouts, dropped sockets | yes     | 5 min, doubling, capped at 2 h   |
+| 403, 401, 400 — rejected metadata or auth    | no      | fails immediately                |
+
+The distinction matters: a permanently rejected video fails identically forever, so
+retrying it only burns quota.
+
+After 12 failed attempts — three days at the quota backoff, well past any daily reset
+or outage that was going to resolve itself — the reel is abandoned: its clips return to
+the queue, the video is deleted, and the failure is announced in Discord.
+
+An interrupted upload is treated the same way. A container restart mid-upload leaves a
+finished video on disk, so it rejoins the retry queue rather than being rebuilt.
+
+A backfill stops as soon as one reel defers. Compiling more would only queue more
+videos behind the same quota wall, and they upload themselves once it resets — so
+there is nothing to re-run for.
+
+`/clips status` and `/health` both report how many reels are waiting to upload.
+
 ## Monetization
 
 It cannot be turned on through the YouTube Data API — there is no field for it on a

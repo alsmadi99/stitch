@@ -1,5 +1,13 @@
 export type ClipStatus = 'pending' | 'used' | 'duplicate' | 'rejected' | 'failed';
-export type ReelStatus = 'building' | 'ready' | 'uploading' | 'uploaded' | 'published' | 'failed';
+export type ReelStatus =
+  | 'building'
+  | 'ready'
+  /** Video is built and on disk; the upload has not succeeded yet. */
+  | 'pending_upload'
+  | 'uploading'
+  | 'uploaded'
+  | 'published'
+  | 'failed';
 export type SourceType = 'attachment' | 'link';
 
 export interface ClipRow {
@@ -34,6 +42,9 @@ export interface ReelRow {
   youtube_id: string | null;
   youtube_url: string | null;
   title: string | null;
+  description: string | null;
+  upload_attempts: number;
+  next_attempt_at: string | null;
   error: string | null;
   created_at: string;
   published_at: string | null;

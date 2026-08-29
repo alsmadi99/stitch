@@ -93,6 +93,29 @@ export function isQuotaError(err: unknown): boolean {
   return /quota|dailyLimit/i.test(record.message ?? '');
 }
 
+/**
+ * Whether a failed upload is worth trying again later.
+ *
+ * Quota exhaustion, rate limits, 5xx responses and dropped connections all say
+ * "not now" rather than "not ever" — the video is fine, only the transport failed.
+ * A rejected video (bad metadata, forbidden, unauthorized) will fail identically
+ * forever, so retrying it just burns quota.
+ */
+export function isRetryableUploadError(err: unknown): boolean {
+  if (isQuotaError(err)) return true;
+
+  const record = err as { code?: number | string; message?: string; status?: number };
+  const status = typeof record.code === 'number' ? record.code : record.status;
+  if (typeof status === 'number' && status >= 500) return true;
+
+  const code = typeof record.code === 'string' ? record.code : '';
+  if (/ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|EPIPE|ERR_STREAM/i.test(code)) {
+    return true;
+  }
+
+  return /socket hang up|network|timeout|backend error|internal error/i.test(record.message ?? '');
+}
+
 /** Manual escape hatch for taking a private upload public. */
 export async function setPrivacy(
   videoId: string,

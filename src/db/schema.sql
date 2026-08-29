@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS reels (
   youtube_id     TEXT,
   youtube_url    TEXT,
   title          TEXT,
+  description    TEXT,
+  upload_attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
   error          TEXT,
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
   published_at   TEXT

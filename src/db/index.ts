@@ -19,6 +19,24 @@ const schemaPath = [
 if (!schemaPath) throw new Error('db/schema.sql not found');
 
 db.exec(fs.readFileSync(schemaPath, 'utf8'));
+
+/**
+ * `CREATE TABLE IF NOT EXISTS` does nothing for a database that already exists, so new
+ * columns have to be added explicitly. Adding a nullable or defaulted column is the one
+ * schema change SQLite does cheaply and safely, which is why migrations here are
+ * limited to that shape.
+ */
+function ensureColumn(table: string, column: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (columns.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  logger.info({ table, column }, 'migrated: added column');
+}
+
+ensureColumn('reels', 'description', 'TEXT');
+ensureColumn('reels', 'upload_attempts', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('reels', 'next_attempt_at', 'TEXT');
+
 logger.debug({ file: config.paths.dbFile }, 'sqlite ready');
 
 export function kvGet(key: string): string | null {

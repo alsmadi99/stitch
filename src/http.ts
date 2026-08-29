@@ -2,7 +2,7 @@ import http from 'node:http';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { countPending } from './db/clips.js';
-import { latestReel } from './db/reels.js';
+import { latestReel, pendingUploadCount } from './db/reels.js';
 import { isCompilingAnywhere } from './pipeline.js';
 import { readJobState } from './jobs.js';
 
@@ -45,6 +45,7 @@ export function startHttpServer(isConnected: () => boolean): http.Server | null 
           compiling: isCompilingAnywhere(),
           queued: countPending(),
           lastReel: latestReel()?.status ?? null,
+          pendingUploads: pendingUploadCount(),
           backfill: jobSummary(),
         }),
       );

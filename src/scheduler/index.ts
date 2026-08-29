@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { countPending } from '../db/clips.js';
-import { isRunning, runPipeline } from '../pipeline.js';
+import { isRunning, retryPendingUploads, runPipeline } from '../pipeline.js';
 
 export function startScheduler(): void {
   if (!cron.validate(config.trigger.cron)) {
@@ -20,6 +20,19 @@ export function startScheduler(): void {
     },
     { timezone: process.env.TZ || undefined },
   );
+
+  // Deferred uploads retry on their own. Hourly is fine: quota resets daily and the
+  // per-reel backoff decides what is actually due.
+  const retries = setInterval(
+    () => {
+      void retryPendingUploads().then(
+        (n) => n > 0 && logger.info({ uploaded: n }, 'retried deferred uploads'),
+        (err) => logger.error({ err: (err as Error).message }, 'upload retry sweep failed'),
+      );
+    },
+    60 * 60_000,
+  );
+  retries.unref();
 
   logger.info({ cron: config.trigger.cron, tz: process.env.TZ ?? 'system' }, 'scheduler started');
 }

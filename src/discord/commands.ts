@@ -119,10 +119,14 @@ async function handleClips(interaction: ChatInputCommandInteraction): Promise<vo
   }
 
   const pending = clipsRepo.countPending();
+  const awaitingUpload = reelsRepo.pendingUploadCount();
   const last = reelsRepo.latestReel();
   const lines = [
     `**${pending}** clip${pending === 1 ? '' : 's'} queued (reel fires at ${config.trigger.maxClips}).`,
     isCompilingAnywhere() ? 'A reel is compiling right now.' : null,
+    awaitingUpload > 0
+      ? `${awaitingUpload} built reel${awaitingUpload === 1 ? '' : 's'} waiting to upload — retrying automatically.`
+      : null,
     last
       ? `Last reel: #${last.id} — ${last.status}${last.youtube_url ? ` — ${last.youtube_url}` : ''}`
       : 'No reels yet.',
