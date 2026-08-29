@@ -1,25 +1,22 @@
 /**
- * Walks the channel's entire history, ingests every video in it, and turns the queue
- * into reels of at most REEL_MAX_CLIPS as it goes.
+ * Asks the running bot to walk the channel history and build reels from it, then
+ * follows along.
  *
- * Progress is checkpointed after every page, so this is safe to stop and re-run — it
- * resumes where it left off rather than re-downloading.
+ * The work happens inside the bot process, not here — so it survives this terminal
+ * closing, its output goes to the container log, and /health reports on it. Ctrl+C
+ * stops watching; it does not stop the job.
  *
  *   npm run backfill                 walk everything, resuming from last position
- *   npm run backfill -- --rescan     re-read the channel from its first message,
- *                                    keeping the database (already-seen clips skipped)
- *   npm run backfill -- --restart    DESTRUCTIVE: wipe the database and all files,
- *                                    then walk the channel from scratch
+ *   npm run backfill -- --status     show the current job and exit
  *   npm run backfill -- --limit 500  only scan the next 500 messages
  *   npm run backfill -- --reels 3    stop after 3 reels instead of BACKFILL_MAX_REELS
- *   npm run backfill -- --scan-only  ingest but never upload
+ *   npm run backfill -- --restart    DESTRUCTIVE: wipe the database and every file
+ *                                    first, then walk the channel from scratch
  *   npm run backfill -- --force      skip the confirmation delay on --restart
  */
-import { logger } from '../src/logger.js';
-import { client, login } from '../src/discord/client.js';
-import { backfill } from '../src/discord/collector.js';
-import { describeDrain, drainHistory } from '../src/drain.js';
-import { describeState, resetState } from '../src/reset.js';
+import { HEARTBEAT_MAX_AGE_MS, heartbeatAgeMs } from '../src/heartbeat.js';
+import { readJobState, requestBackfill, type JobState } from '../src/jobs.js';
+import { describeState } from '../src/reset.js';
 
 function flag(name: string): boolean {
   return process.argv.includes(`--${name}`);
@@ -32,8 +29,41 @@ function option(name: string): number | undefined {
   return Number.isFinite(value) ? value : undefined;
 }
 
-const limit = option('limit');
-const rescan = flag('rescan');
+function render(state: JobState): string {
+  const p = state.progress;
+  const counts = p
+    ? `scanned ${p.scanned}, queued ${p.accepted}, duplicates ${p.duplicate}, rejected ${p.rejected}, reels ${p.reels}`
+    : 'no progress yet';
+  return `[${state.status}] ${counts}`;
+}
+
+if (flag('status')) {
+  const state = readJobState();
+  if (!state) {
+    console.log('No backfill has been run yet.');
+  } else {
+    console.log(render(state));
+    if (state.detail) console.log(`\n${state.detail}`);
+  }
+  process.exit(0);
+}
+
+// The job runs inside the bot, so there is no point filing a request it will never see.
+const age = heartbeatAgeMs();
+if (age === null || age > HEARTBEAT_MAX_AGE_MS) {
+  console.error(
+    'The bot does not appear to be running — it is what executes the backfill.\n' +
+      'Check the container logs and /health, then try again.',
+  );
+  process.exit(1);
+}
+
+const running = readJobState();
+if (running?.status === 'running' || running?.status === 'queued') {
+  console.error(`A backfill is already ${running.status}: ${render(running)}`);
+  console.error('Watch it with --status, or wait for it to finish.');
+  process.exit(1);
+}
 
 if (flag('restart')) {
   const state = describeState();
@@ -54,26 +84,34 @@ if (flag('restart')) {
     console.log('\nStarting in 8 seconds. Ctrl+C to abort, or pass --force to skip this wait.');
     await new Promise((resolve) => setTimeout(resolve, 8000));
   }
-
-  const summary = await resetState();
-  console.log(
-    `\nReset: removed ${summary.clips} clips, ${summary.reels} reels, ${summary.files} files (${summary.megabytes} MB).\n`,
-  );
 }
 
-await login();
+requestBackfill({
+  limit: option('limit'),
+  maxReels: option('reels'),
+  restart: flag('restart'),
+});
 
-if (flag('scan-only')) {
-  const stats = await backfill(client, { limit, restart: rescan });
-  logger.info(stats, 'scan complete (no reels built)');
-} else {
-  const result = await drainHistory(client, {
-    limit,
-    restart: rescan,
-    maxReels: option('reels'),
-  });
-  console.log(`\n${describeDrain(result)}\n`);
+console.log('Backfill queued. It runs inside the bot, so this terminal can be closed.');
+console.log('Following along — Ctrl+C stops watching, not the job.\n');
+
+let lastLine = '';
+for (;;) {
+  const state = readJobState();
+  if (!state) break;
+
+  const line = render(state);
+  if (line !== lastLine) {
+    console.log(`${new Date().toLocaleTimeString()}  ${line}`);
+    lastLine = line;
+  }
+
+  if (state.status !== 'queued' && state.status !== 'running') {
+    if (state.detail) console.log(`\n${state.detail}`);
+    break;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 3000));
 }
 
-await client.destroy();
 process.exit(0);

@@ -95,6 +95,29 @@ them as reels of at most `REEL_MAX_CLIPS` — the same 20-clip format as a norma
 npm run backfill
 ```
 
+**The work runs inside the bot, not in your terminal.** The command files a request, the
+bot picks it up within a few seconds, and your shell just follows along — so closing the
+terminal is safe, the output goes to the container log with everything else, and
+`/health` reports live progress. Ctrl+C stops watching; it does not stop the job.
+
+That is deliberate: a full history walk runs for hours, and a job living in an
+interactive shell dies the moment the pty closes.
+
+Check on it at any time, from anywhere:
+
+```bash
+npm run backfill:status
+```
+
+```bash
+curl -s https://your-domain/health
+```
+
+Only one backfill can be queued or running at a time; a second request is refused
+rather than starting a competing scan. If the container restarts mid-job the job is
+marked `interrupted` on the next boot — re-run the command and the cursor continues
+from where it stopped.
+
 Images, screenshots, links to image hosts, and plain text are filtered out before
 anything is downloaded, so a chatty channel costs nothing but the history scan.
 
@@ -195,26 +218,9 @@ A backfill is a one-off command, not a service, so it does **not** restart itsel
 a redeploy. Re-run the same command; already-scanned messages are skipped and
 already-downloaded clips are still queued.
 
-### Running a backfill that outlives your terminal
-
-A full history walk runs for hours. Started from an interactive container shell it is a
-child of that shell, so detach it explicitly rather than trusting the terminal to stay
-open:
-
-```bash
-setsid nohup node dist/scripts/backfill.js >> /app/data/backfill.log 2>&1 &
-```
-
-`setsid` detaches it from the terminal's session, `nohup` ignores the hangup, and the
-redirect moves its output off the pty and into the data volume where you can tail it.
-Then watch it with:
-
-```bash
-tail -f /app/data/backfill.log
-```
-
-It still dies if the *container* restarts — it is not the container's main process — but
-the cursor means re-running continues where it stopped.
+A backfill runs inside the bot process, so a closed terminal cannot kill it. A
+*container* restart still ends it — it is marked `interrupted` on the next boot, and
+re-running the command continues from the cursor.
 
 Shutdown is deliberately immediate rather than waiting for the current compile: the
 stop grace period is seconds and a compile is minutes, so waiting only delays the

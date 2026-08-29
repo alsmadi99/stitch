@@ -6,6 +6,7 @@ import { deployCommands, registerCommands } from './discord/commands.js';
 import { hasYtDlp } from './ingest/download.js';
 import { beat } from './heartbeat.js';
 import { startHttpServer } from './http.js';
+import { recoverInterruptedJob, startJobRunner } from './jobs.js';
 import { isRunning, recoverInterruptedReels } from './pipeline.js';
 import { cleanStaleWorkFiles } from './video/compile.js';
 import { maybeRunOnThreshold, startScheduler } from './scheduler/index.js';
@@ -30,6 +31,7 @@ async function main(): Promise<void> {
   // A redeploy or crash mid-compile leaves clips attached to a reel that will never
   // finish. Put them back in the queue before anything else runs.
   recoverInterruptedReels();
+  recoverInterruptedJob();
   await cleanStaleWorkFiles();
 
   registerCollector(client, maybeRunOnThreshold);
@@ -48,6 +50,10 @@ async function main(): Promise<void> {
   heartbeat.unref();
 
   startHttpServer(() => client.isReady());
+
+  // Long-running jobs (the history backfill) run here rather than in a terminal
+  // session, so they survive disconnects and log to the container like everything else.
+  startJobRunner(client);
 
   logger.info('ready');
 }

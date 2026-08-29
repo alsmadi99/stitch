@@ -30,6 +30,9 @@ yarn-error.log*
 .hb/
 .mock/
 .rectest/
+.jt/
+.jg/
+.rt/
 .tmp/
 tmp/
 coverage/
@@ -45,3 +48,5 @@ coverage/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+.jt

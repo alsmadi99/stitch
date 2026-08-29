@@ -22,6 +22,8 @@ export interface DrainOptions {
   restart?: boolean;
   /** Cap on reels produced in this run. Defaults to BACKFILL_MAX_REELS. */
   maxReels?: number;
+  /** Called after each page and each reel, so a caller can report live progress. */
+  onProgress?: (progress: BackfillStats & { reels: number }) => void;
 }
 
 /**
@@ -53,6 +55,7 @@ export async function drainHistory(client: Client, options: DrainOptions = {}): 
     try {
       const result = await runPipeline('threshold');
       if (result.status === 'uploaded' || result.status === 'compiled') reels++;
+      report();
       return true;
     } catch (err) {
       if (isQuotaError(err)) {
@@ -65,13 +68,19 @@ export async function drainHistory(client: Client, options: DrainOptions = {}): 
   };
 
   let stats: BackfillStats = { scanned: 0, accepted: 0, duplicate: 0, rejected: 0 };
+  let lastStats: BackfillStats = stats;
+  const report = () => options.onProgress?.({ ...lastStats, reels });
 
   try {
     stats = await backfill(client, {
       limit: options.limit,
       restart: options.restart,
       onThreshold: buildReel,
-      onProgress: (s) => logger.info({ ...s, reels }, 'drain progress'),
+      onProgress: (s) => {
+        lastStats = s;
+        logger.info({ ...s, reels }, 'drain progress');
+        report();
+      },
     });
 
     // Whatever is left over after the scan is still worth a (shorter) reel.
