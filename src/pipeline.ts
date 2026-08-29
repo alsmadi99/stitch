@@ -10,6 +10,36 @@ import { announceFailure, announceReel } from './discord/notify.js';
 
 export type Trigger = 'threshold' | 'cron' | 'manual';
 
+/**
+ * Returns clips from reels that never finished.
+ *
+ * Clips are marked `used` before compiling starts, and compiling takes minutes. If the
+ * process is killed in that window — a redeploy, an OOM, a host reboot — the failure
+ * handler never runs and those clips stay attached to a reel stuck in `building`,
+ * silently excluded from every future reel. Recovering at startup is the only place
+ * this can be caught, because by definition the process that owned them is gone.
+ *
+ * A reel interrupted during `uploading` is treated the same way. The window between
+ * YouTube returning a video id and that id being written to the database is a few
+ * milliseconds, so a duplicate upload is vanishingly unlikely — and losing 20 clips is
+ * the worse outcome.
+ */
+export function recoverInterruptedReels(): number {
+  const stuck = reelsRepo.unfinishedReels();
+  if (stuck.length === 0) return 0;
+
+  for (const reel of stuck) {
+    clipsRepo.releaseClips(reel.id);
+    reelsRepo.setReelStatus(reel.id, 'failed', 'interrupted before it finished');
+    logger.warn(
+      { reelId: reel.id, status: reel.status, clips: reel.clip_count },
+      'recovered clips from an interrupted reel',
+    );
+  }
+
+  return stuck.length;
+}
+
 export interface RunResult {
   status: 'skipped' | 'busy' | 'compiled' | 'uploaded';
   reelId?: number;

@@ -6,6 +6,8 @@ import { deployCommands, registerCommands } from './discord/commands.js';
 import { hasYtDlp } from './ingest/download.js';
 import { beat } from './heartbeat.js';
 import { startHttpServer } from './http.js';
+import { isRunning, recoverInterruptedReels } from './pipeline.js';
+import { cleanStaleWorkFiles } from './video/compile.js';
 import { maybeRunOnThreshold, startScheduler } from './scheduler/index.js';
 import { db } from './db/index.js';
 
@@ -24,6 +26,11 @@ async function main(): Promise<void> {
     logger.warn('YouTube is not configured — reels will be compiled locally only');
   }
   if (config.ingest.allowLinks) await hasYtDlp();
+
+  // A redeploy or crash mid-compile leaves clips attached to a reel that will never
+  // finish. Put them back in the queue before anything else runs.
+  recoverInterruptedReels();
+  await cleanStaleWorkFiles();
 
   registerCollector(client, maybeRunOnThreshold);
   registerCommands(client);
@@ -46,7 +53,14 @@ async function main(): Promise<void> {
 }
 
 function shutdown(signal: string): void {
-  logger.info({ signal }, 'shutting down');
+  // A compile takes minutes and the stop grace period is seconds, so there is nothing
+  // useful to wait for. Say so plainly; startup recovery puts the clips back.
+  if (isRunning()) {
+    logger.warn({ signal }, 'shutting down mid-compile — its clips return to the queue on restart');
+  } else {
+    logger.info({ signal }, 'shutting down');
+  }
+
   void client.destroy().finally(() => {
     db.close();
     process.exit(0);

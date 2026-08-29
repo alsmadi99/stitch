@@ -44,6 +44,7 @@ const schema = z.object({
   CLIPS_CHANNEL_ID: z.string().min(1, 'CLIPS_CHANNEL_ID is required'),
   ANNOUNCE_CHANNEL_ID: str(),
   ADMIN_ROLE_IDS: csv(),
+  ADMIN_USER_IDS: csv(),
 
   REEL_MAX_CLIPS: num(20),
   REEL_MIN_CLIPS: num(5),
@@ -154,6 +155,7 @@ export const config = {
     clipsChannelId: env.CLIPS_CHANNEL_ID,
     announceChannelId: env.ANNOUNCE_CHANNEL_ID || env.CLIPS_CHANNEL_ID,
     adminRoleIds: env.ADMIN_ROLE_IDS,
+    adminUserIds: env.ADMIN_USER_IDS,
   },
   trigger: {
     maxClips: env.REEL_MAX_CLIPS,

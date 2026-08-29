@@ -130,20 +130,59 @@ Run it again the next day to continue where it stopped.
 
 ## Slash commands
 
-| Command           | What it does                                                  |
-| ----------------- | ------------------------------------------------------------- |
-| `/clips status`   | Queue size, whether a reel is compiling, and the last reel     |
-| `/clips backfill` | Scans channel history for clips posted before the bot joined   |
-| `/reel build`     | Compiles now, ignoring the threshold                           |
-| `/reel publish`   | Attempts to flip the latest uploaded reel to public            |
+| Command         | Who                | What it does                                    |
+| --------------- | ------------------ | ----------------------------------------------- |
+| `/clips status` | `ADMIN_ROLE_IDS`   | Queue size, whether a reel is compiling, last reel |
+| `/reel build`   | `ADMIN_USER_IDS`   | Compiles now, ignoring the threshold            |
+| `/reel publish` | `ADMIN_USER_IDS`   | Attempts to flip the latest uploaded reel public |
 
-Access defaults to anyone with **Manage Server**; set `ADMIN_ROLE_IDS` to restrict it
-to specific roles.
+**Backfill is not a Discord command.** It walks the whole channel, downloads gigabytes,
+and uploads several videos against a quota that allows six a day. One mistaken
+invocation costs a day of uploads and cannot be recalled, so it lives in
+`scripts/backfill.ts` and runs from the server only.
+
+`/reel build` and `/reel publish` spend upload quota, so they are gated on
+`ADMIN_USER_IDS` — a list of Discord **user** IDs, not roles. Leave it blank and those
+commands are **not registered at all**; there is no permission fallback, because there
+is no safe default answer to who may publish to your channel. The handler re-checks the
+allowlist on every invocation, so a registration left over from an earlier config
+cannot become an open door.
+
+`/clips status` is read-only and uses `ADMIN_ROLE_IDS`, falling back to **Manage
+Server** when that is unset.
 
 When a reel is uploaded the bot posts the YouTube link on its own — no embed, no
 buttons, no call to action. Discord unfurls the link into a player card itself.
 
 The bot reacts to each clip message: ✅ queued, ♻️ duplicate, ⚠️ rejected.
+
+## Restarts and redeploys
+
+Clips are marked `used` before compiling begins, and compiling takes minutes. If the
+process dies in that window — a redeploy, an OOM kill, a host reboot — the failure
+handler never runs, and without recovery those clips would stay attached to a reel
+stuck in `building`: silently excluded from every future reel.
+
+So on every startup the bot releases the clips of any reel left in `building` or
+`uploading`, marks that reel failed, and deletes the normalize/stitch intermediates a
+killed run left in `data/work/`. Nothing is lost and no disk leaks. A failed reel does
+not consume an episode number either, so numbering stays contiguous.
+
+What actually happens if you deploy mid-run:
+
+| Interrupted during | Result                                                        |
+| ------------------ | -------------------------------------------------------------- |
+| Compiling          | Clips return to the queue on restart; the next reel includes them |
+| Uploading          | Same. The abandoned resumable session expires on YouTube's side  |
+| Backfill           | The process ends. Re-run it — the cursor resumes where it stopped |
+
+A backfill is a one-off command, not a service, so it does **not** restart itself after
+a redeploy. Re-run the same command; already-scanned messages are skipped and
+already-downloaded clips are still queued.
+
+Shutdown is deliberately immediate rather than waiting for the current compile: the
+stop grace period is seconds and a compile is minutes, so waiting only delays the
+inevitable kill. The log says plainly when it happens.
 
 ## How deduplication works
 

@@ -8,6 +8,23 @@ import { encoderArgs, ffmpeg, threadArgs } from './ffmpeg.js';
 import { normalizeClip, type NormalizedClip } from './normalize.js';
 import { generateThumbnail } from './thumbnail.js';
 
+/**
+ * Deletes normalize and stitch intermediates left behind by a killed process. They are
+ * only ever inputs to a compile that is already over, and at 1080p each one is tens of
+ * megabytes, so a few interrupted runs quietly fill the volume.
+ */
+export async function cleanStaleWorkFiles(): Promise<number> {
+  const entries = await fsp.readdir(config.paths.workDir).catch(() => []);
+  const stale = entries.filter((f) => /^(norm-|stitch-|label-|thumb-)/.test(f));
+
+  await Promise.all(
+    stale.map((f) => fsp.rm(path.join(config.paths.workDir, f), { force: true }).catch(() => undefined)),
+  );
+
+  if (stale.length > 0) logger.warn({ files: stale.length }, 'removed stale work files');
+  return stale.length;
+}
+
 /** Quality used for intermediate stitch levels; only the final pass uses X264_CRF. */
 const INTERMEDIATE_CRF = 16;
 

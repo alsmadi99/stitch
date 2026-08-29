@@ -16,43 +16,41 @@ import * as clipsRepo from '../db/clips.js';
 import * as reelsRepo from '../db/reels.js';
 import { isRunning, runPipeline } from '../pipeline.js';
 import { setPrivacy } from '../youtube/upload.js';
-import { describeDrain, drainHistory } from '../drain.js';
 
-const commands = [
-  new SlashCommandBuilder()
-    .setName('clips')
-    .setDescription('Inspect the clip queue')
-    .addSubcommand((s) => s.setName('status').setDescription('Show queue size and the last reel'))
-    .addSubcommand((s) =>
-      s
-        .setName('backfill')
-        .setDescription('Scan the whole channel history and build reels from every clip in it')
-        .addIntegerOption((o) =>
-          o
-            .setName('limit')
-            .setDescription('Only scan this many messages (default: everything)')
-            .setMinValue(1)
-            .setMaxValue(100000),
+/**
+ * Backfill is intentionally absent from Discord.
+ *
+ * It walks the entire channel history, downloads gigabytes, and uploads several videos
+ * against a daily quota that allows six. A chat command is the wrong trigger for that
+ * no matter who is allowed to send it — one mistaken invocation costs a day of uploads
+ * and cannot be called back. It lives in `scripts/backfill.ts`, run from the server.
+ */
+function commandDefinitions() {
+  const commands = [
+    new SlashCommandBuilder()
+      .setName('clips')
+      .setDescription('Inspect the clip queue')
+      .addSubcommand((s) => s.setName('status').setDescription('Show queue size and the last reel')),
+  ];
+
+  // Registered only when an explicit user allowlist exists. Without one there is no
+  // safe answer to "who may spend the upload quota", so the commands do not exist.
+  if (config.discord.adminUserIds.length > 0) {
+    commands.push(
+      new SlashCommandBuilder()
+        .setName('reel')
+        .setDescription('Build and publish reels')
+        .addSubcommand((s) =>
+          s.setName('build').setDescription('Compile a reel now, ignoring the clip threshold'),
         )
-        .addIntegerOption((o) =>
-          o
-            .setName('reels')
-            .setDescription('Stop after this many reels (default: BACKFILL_MAX_REELS)')
-            .setMinValue(1)
-            .setMaxValue(20),
-        )
-        .addBooleanOption((o) =>
-          o
-            .setName('restart')
-            .setDescription('Start again from the first message instead of resuming'),
+        .addSubcommand((s) =>
+          s.setName('publish').setDescription('Make the latest uploaded reel public'),
         ),
-    ),
-  new SlashCommandBuilder()
-    .setName('reel')
-    .setDescription('Build and publish reels')
-    .addSubcommand((s) => s.setName('build').setDescription('Compile a reel now, ignoring the clip threshold'))
-    .addSubcommand((s) => s.setName('publish').setDescription('Make the latest uploaded reel public')),
-].map((c) => c.toJSON());
+    );
+  }
+
+  return commands.map((c) => c.toJSON());
+}
 
 export async function deployCommands(): Promise<void> {
   const rest = new REST({ version: '10' }).setToken(config.discord.token);
@@ -60,13 +58,31 @@ export async function deployCommands(): Promise<void> {
     ? Routes.applicationGuildCommands(config.discord.appId, config.discord.guildId)
     : Routes.applicationCommands(config.discord.appId);
 
-  await rest.put(route, { body: commands });
-  logger.info({ scope: config.discord.guildId ? 'guild' : 'global' }, 'slash commands deployed');
+  const body = commandDefinitions();
+  await rest.put(route, { body });
+
+  logger.info(
+    {
+      scope: config.discord.guildId ? 'guild' : 'global',
+      commands: body.map((c) => c.name),
+      privileged: config.discord.adminUserIds.length > 0 ? 'enabled' : 'disabled (ADMIN_USER_IDS unset)',
+    },
+    'slash commands deployed',
+  );
 }
 
-function isAuthorized(interaction: Interaction): boolean {
+/** Named in ADMIN_USER_IDS. The only identity that may trigger an upload from chat. */
+function isOwner(interaction: Interaction): boolean {
+  return config.discord.adminUserIds.includes(interaction.user.id);
+}
+
+/** Read-only access: an owner, an allowed role, or Manage Server when neither is set. */
+function canReadStatus(interaction: Interaction): boolean {
+  if (isOwner(interaction)) return true;
+
   const member = interaction.member as GuildMember | null;
   if (!member) return false;
+
   if (config.discord.adminRoleIds.length > 0) {
     return config.discord.adminRoleIds.some((id) => member.roles?.cache?.has(id));
   }
@@ -84,71 +100,57 @@ export function registerCommands(client: Client): void {
 async function handleInteraction(interaction: Interaction): Promise<void> {
   if (!interaction.isChatInputCommand()) return;
 
-  if (!isAuthorized(interaction)) {
-    await interaction.reply({ content: 'You need Manage Server for that.', flags: MessageFlags.Ephemeral });
-    return;
-  }
-
   if (interaction.commandName === 'clips') return handleClips(interaction);
   if (interaction.commandName === 'reel') return handleReel(interaction);
 }
 
+async function deny(interaction: ChatInputCommandInteraction, reason: string): Promise<void> {
+  logger.warn(
+    { user: interaction.user.id, command: interaction.commandName },
+    'rejected an unauthorized command',
+  );
+  await interaction.reply({ content: reason, flags: MessageFlags.Ephemeral });
+}
+
 async function handleClips(interaction: ChatInputCommandInteraction): Promise<void> {
-  const sub = interaction.options.getSubcommand();
-
-  if (sub === 'status') {
-    const pending = clipsRepo.countPending();
-    const last = reelsRepo.latestReel();
-    const lines = [
-      `**${pending}** clip${pending === 1 ? '' : 's'} queued (reel fires at ${config.trigger.maxClips}).`,
-      isRunning() ? 'A reel is compiling right now.' : null,
-      last
-        ? `Last reel: #${last.id} — ${last.status}${last.youtube_url ? ` — ${last.youtube_url}` : ''}`
-        : 'No reels yet.',
-    ].filter(Boolean);
-
-    await interaction.reply({ content: lines.join('\n'), flags: MessageFlags.Ephemeral });
+  if (!canReadStatus(interaction)) {
+    await deny(interaction, 'You are not allowed to run that.');
     return;
   }
 
-  if (sub === 'backfill') {
-    if (isRunning()) {
-      await interaction.reply({ content: 'A reel is compiling — try again once it finishes.', flags: MessageFlags.Ephemeral });
-      return;
-    }
+  const pending = clipsRepo.countPending();
+  const last = reelsRepo.latestReel();
+  const lines = [
+    `**${pending}** clip${pending === 1 ? '' : 's'} queued (reel fires at ${config.trigger.maxClips}).`,
+    isRunning() ? 'A reel is compiling right now.' : null,
+    last
+      ? `Last reel: #${last.id} — ${last.status}${last.youtube_url ? ` — ${last.youtube_url}` : ''}`
+      : 'No reels yet.',
+  ].filter(Boolean);
 
-    const limit = interaction.options.getInteger('limit') ?? undefined;
-    const maxReels = interaction.options.getInteger('reels') ?? undefined;
-    const restart = interaction.options.getBoolean('restart') ?? false;
-
-    await interaction.reply({
-      content: [
-        restart
-          ? 'Rescanning the channel from its first message.'
-          : 'Scanning the channel history from where the last run stopped.',
-        'Each batch of clips is uploaded as its own reel and the link is posted here.',
-        'This runs for as long as it needs — check progress with `/clips status`.',
-      ].join('\n'),
-      flags: MessageFlags.Ephemeral,
-    });
-
-    // Not awaited: a full history walk far outlives the 15 minute interaction token.
-    void drainHistory(interaction.client, { limit, restart, maxReels })
-      .then((result) => logger.info({ summary: describeDrain(result) }, 'backfill finished'))
-      .catch((err) => logger.error({ err: (err as Error).message }, 'backfill failed'));
-  }
+  await interaction.reply({ content: lines.join('\n'), flags: MessageFlags.Ephemeral });
 }
 
 async function handleReel(interaction: ChatInputCommandInteraction): Promise<void> {
+  // Belt and braces: these commands are not registered without an allowlist, but a
+  // stale registration from an earlier config must not become an open door.
+  if (config.discord.adminUserIds.length === 0 || !isOwner(interaction)) {
+    await deny(interaction, 'You are not allowed to run that.');
+    return;
+  }
+
   const sub = interaction.options.getSubcommand();
 
   if (sub === 'build') {
     if (isRunning()) {
-      await interaction.reply({ content: 'A reel is already compiling.', flags: MessageFlags.Ephemeral });
+      await interaction.reply({
+        content: 'A reel is already compiling.',
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
     await interaction.reply({
-      content: 'Building — this takes a while. I will post the result here.',
+      content: 'Building — this takes a while. I will post the link here.',
       flags: MessageFlags.Ephemeral,
     });
     // Deliberately not awaited: compiling outlives the 15-minute interaction token.
@@ -161,7 +163,10 @@ async function handleReel(interaction: ChatInputCommandInteraction): Promise<voi
   if (sub === 'publish') {
     const reel = reelsRepo.latestReel();
     if (!reel?.youtube_id) {
-      await interaction.reply({ content: 'No uploaded reel to publish.', flags: MessageFlags.Ephemeral });
+      await interaction.reply({
+        content: 'No uploaded reel to publish.',
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });

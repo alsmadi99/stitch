@@ -29,6 +29,7 @@ yarn-error.log*
 .chk/
 .hb/
 .mock/
+.rectest/
 .tmp/
 tmp/
 coverage/

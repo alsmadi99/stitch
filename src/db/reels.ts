@@ -32,6 +32,13 @@ export function completedReelCount(): number {
   return row?.n ?? 0;
 }
 
+/** Reels left mid-flight by a crash or redeploy — their clips need releasing. */
+export function unfinishedReels(): ReelRow[] {
+  return db
+    .prepare("SELECT * FROM reels WHERE status IN ('building', 'uploading') ORDER BY id")
+    .all() as ReelRow[];
+}
+
 export function latestReel(): ReelRow | undefined {
   return db.prepare('SELECT * FROM reels ORDER BY id DESC LIMIT 1').get() as ReelRow | undefined;
 }
