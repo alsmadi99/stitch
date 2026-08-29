@@ -1,9 +1,34 @@
+# Dependencies and build output are produced inside the image, never copied in.
 node_modules
 dist
+*.tsbuildinfo
+
+# Secrets never enter the image. Environment comes from the runtime, not the build.
+.env
+.env.*
+
+# Runtime state belongs to the mounted volume.
 data
+
+# Scratch and test output
 .smoke
+.chk
+.hb
+.mock
+.tmp
+tmp
+coverage
+
+# Version control and tooling
 .git
 .gitignore
-.env
-*.log
+.github
+.idea
+.vscode
+
+# Docs and compose are not needed to build the image.
 README.md
+docker-compose.yml
+*.log
+.DS_Store
+Thumbs.db

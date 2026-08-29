@@ -18,8 +18,9 @@ COPY src ./src
 COPY scripts ./scripts
 RUN npm run build
 
-# Drop dev dependencies from the tree that gets copied into the runtime image.
-RUN npm prune --omit=dev
+# Drop dev dependencies, and the optional ffmpeg/ffprobe static binaries — they carry
+# ~410MB of per-platform builds and the runtime image uses the distro ffmpeg instead.
+RUN npm prune --omit=dev --omit=optional
 
 
 FROM node:20-bookworm-slim AS runtime
@@ -27,23 +28,31 @@ FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# fonts-dejavu-core: the thumbnail and title cards need a real TTF for drawtext.
-# yt-dlp is optional but small, and without it link clips are silently skipped.
+# Distro ffmpeg rather than the bundled ffmpeg-static binary: the static Linux build
+# ships without libfreetype, so it has no drawtext filter and every thumbnail label
+# fails. Debian's build has it. fonts-dejavu-core supplies the TTF it renders with.
+# yt-dlp is optional but small; without it link clips are skipped.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates fonts-dejavu-core curl \
+  && apt-get install -y --no-install-recommends \
+       ca-certificates ffmpeg fonts-dejavu-core curl \
   && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o /usr/local/bin/yt-dlp \
   && chmod +x /usr/local/bin/yt-dlp \
   && apt-get purge -y curl && apt-get autoremove -y \
   && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY package.json ./
+ENV FFMPEG_PATH=/usr/bin/ffmpeg \
+    FFPROBE_PATH=/usr/bin/ffprobe
+
+# --chown on the COPY itself. A separate `chown -R` would rewrite every file and
+# duplicate the whole node_modules tree into a second layer.
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
+COPY --chown=node:node package.json ./
 # schema.sql is not TypeScript, so tsc does not emit it; the DB layer reads it from here.
-COPY src/db/schema.sql ./src/db/schema.sql
+COPY --chown=node:node src/db/schema.sql ./src/db/schema.sql
 
 # The data volume holds the SQLite database, downloaded clips, and finished reels.
-RUN mkdir -p /app/data && chown -R node:node /app
+RUN mkdir -p /app/data && chown node:node /app/data
 VOLUME ["/app/data"]
 
 USER node

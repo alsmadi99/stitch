@@ -17,6 +17,8 @@ services:
     build: .
     container_name: clipreel
     restart: unless-stopped
+    # Dokploy writes the variables from its Environment tab into a .env beside this
+    # file, so the same compose works locally and there.
     env_file: .env
 
     environment:
@@ -42,7 +44,7 @@ services:
       # Refuse to start a download below this much free space on the volume.
       MIN_FREE_DISK_MB: 3072
       # Delete source clips once their reel is uploaded — important for long backfills.
-      CLEANUP_SOURCES: "true"
+      CLEANUP_SOURCES: 'true'
 
       # --- backfill pacing ---
       # YouTube allows 10,000 quota units/day and an upload costs 1,600, so six uploads
@@ -58,7 +60,7 @@ services:
         limits:
           # Above the measured 1080p/batch-3 peak with headroom for Node and the OS.
           memory: 1536M
-          cpus: "2.0"
+          cpus: '2.0'
         reservations:
           memory: 256M
 
@@ -74,5 +76,5 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: '10m'
+        max-file: '3'

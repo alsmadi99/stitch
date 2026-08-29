@@ -128,6 +128,7 @@ const schema = z.object({
   ]),
   YOUTUBE_CATEGORY_ID: str('20'),
 
+  HTTP_PORT: num(3000),
   LOG_LEVEL: str('info'),
   DATA_DIR: str('./data'),
   CLEANUP_SOURCES: bool(false),
@@ -208,6 +209,9 @@ export const config = {
     workDir: path.join(dataDir, 'work'),
     outDir: path.join(dataDir, 'out'),
     dbFile: path.join(dataDir, 'clipreel.db'),
+  },
+  http: {
+    port: env.HTTP_PORT,
   },
   logLevel: env.LOG_LEVEL,
   cleanupSources: env.CLEANUP_SOURCES,

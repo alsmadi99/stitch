@@ -1,16 +1,33 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import ffmpegStatic from 'ffmpeg-static';
-import ffprobeStatic from 'ffprobe-static';
+import { createRequire } from 'node:module';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 
-// ffmpeg-static's default export is the binary path, but its bundled .d.ts declares a
-// module namespace under NodeNext resolution, hence the cast.
-const bundledFfmpeg = ffmpegStatic as unknown as string | null;
+const require = createRequire(import.meta.url);
 
-export const FFMPEG = process.env.FFMPEG_PATH || bundledFfmpeg || 'ffmpeg';
-export const FFPROBE = process.env.FFPROBE_PATH || ffprobeStatic.path || 'ffprobe';
+/**
+ * ffmpeg-static and ffprobe-static are convenient for local development but carry
+ * ~410MB of binaries for every platform, and the static Linux ffmpeg has no drawtext
+ * filter. The container installs the distro build and omits both packages, so they are
+ * resolved optionally rather than imported.
+ */
+function bundledBinary(pkg: string, pick: (mod: unknown) => unknown): string | null {
+  try {
+    const value = pick(require(pkg));
+    return typeof value === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export const FFMPEG =
+  process.env.FFMPEG_PATH || bundledBinary('ffmpeg-static', (m) => m) || 'ffmpeg';
+
+export const FFPROBE =
+  process.env.FFPROBE_PATH ||
+  bundledBinary('ffprobe-static', (m) => (m as { path?: string }).path) ||
+  'ffprobe';
 
 /**
  * Caps ffmpeg's own threading. Left at 0 (auto) it spawns one worker per core and will
@@ -128,6 +145,43 @@ export function ffprobe(args: string[]): Promise<RunResult> {
  */
 export function escapeFilterPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/:/g, '\\:');
+}
+
+let filterCache: Set<string> | null = null;
+
+/**
+ * Whether this ffmpeg build actually has a filter. Builds differ in what they were
+ * compiled with — notably the static Linux ffmpeg-static binary has no libfreetype and
+ * therefore no `drawtext` — and a missing filter otherwise fails the whole encode.
+ */
+export async function hasFilter(name: string): Promise<boolean> {
+  if (!filterCache) {
+    try {
+      const { stdout } = await ffmpeg(['-filters'], { binaryStdout: true });
+      filterCache = new Set(
+        stdout
+          .toString('utf8')
+          .split('\n')
+          .map((line) => line.trim().split(/\s+/)[1] ?? '')
+          .filter(Boolean),
+      );
+    } catch {
+      filterCache = new Set();
+    }
+  }
+  return filterCache.has(name);
+}
+
+/** True when text can be burned into video: the filter exists and a font is installed. */
+export async function canDrawText(fontFile?: string): Promise<boolean> {
+  if (!(await hasFilter('drawtext'))) {
+    logger.warn(
+      { ffmpeg: FFMPEG },
+      'this ffmpeg build has no drawtext filter — text overlays will be skipped',
+    );
+    return false;
+  }
+  return resolveFont(fontFile) !== null;
 }
 
 const FONT_CANDIDATES = [

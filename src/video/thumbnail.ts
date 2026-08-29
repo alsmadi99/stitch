@@ -2,7 +2,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
-import { escapeFilterPath, ffmpeg, resolveFont, threadArgs } from './ffmpeg.js';
+import { canDrawText, escapeFilterPath, ffmpeg, resolveFont, threadArgs } from './ffmpeg.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -25,11 +25,26 @@ export async function generateThumbnail(
 ): Promise<string> {
   const out = path.join(config.paths.outDir, `reel-${reelId}.jpg`);
   const timestamp = await pickBestFrame(video, duration);
-  const font = resolveFont(config.video.fontFile);
+  const font = (await canDrawText(config.video.fontFile)) ? resolveFont(config.video.fontFile) : null;
 
+  // A missing font or a drawtext-less ffmpeg build costs the labels, never the reel.
   if (!font) {
-    logger.warn('no font available — falling back to a plain frame grab for the thumbnail');
-    await ffmpeg(['-y', ...threadArgs(), '-ss', timestamp.toFixed(2), '-i', video, '-frames:v', '1', '-q:v', '2', out]);
+    logger.warn('cannot burn text — falling back to a plain graded frame for the thumbnail');
+    await ffmpeg([
+      '-y',
+      ...threadArgs(),
+      '-ss',
+      timestamp.toFixed(2),
+      '-i',
+      video,
+      '-frames:v',
+      '1',
+      '-vf',
+      `scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=increase,crop=${WIDTH}:${HEIGHT},eq=saturation=1.25:contrast=1.08,vignette=PI/5`,
+      '-q:v',
+      '3',
+      out,
+    ]);
     return out;
   }
 

@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { probe } from '../ingest/probe.js';
 import type { ClipRow } from '../types.js';
-import { encoderArgs, escapeFilterPath, ffmpeg, resolveFont, threadArgs } from './ffmpeg.js';
+import { canDrawText, encoderArgs, escapeFilterPath, ffmpeg, resolveFont, threadArgs } from './ffmpeg.js';
 
 export interface NormalizedClip {
   clipId: number;
@@ -78,6 +78,7 @@ export async function normalizeClip(clip: ClipRow, index: number): Promise<Norma
  */
 async function buildLabelFilter(clip: ClipRow, height: number): Promise<string | null> {
   if (!config.video.titleCards) return null;
+  if (!(await canDrawText(config.video.fontFile))) return null;
 
   const font = resolveFont(config.video.fontFile);
   if (!font) return null;

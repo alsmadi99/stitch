@@ -22,28 +22,30 @@
     "reel:now": "tsx scripts/run-now.ts"
   },
   "dependencies": {
+    "@googleapis/youtube": "^34.1.0",
     "better-sqlite3": "^11.8.1",
     "discord.js": "^14.18.0",
     "dotenv": "^16.4.7",
-    "ffmpeg-static": "^5.2.0",
-    "ffprobe-static": "^3.1.0",
-    "googleapis": "^144.0.0",
     "node-cron": "^3.0.3",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "zod": "^3.24.1"
   },
+  "optionalDependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0"
+  },
   "devDependencies": {
+    "@eslint/js": "^9.18.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/ffprobe-static": "^2.0.3",
     "@types/node": "^22.10.7",
     "@types/node-cron": "^3.0.11",
-    "typescript": "^5.7.3",
-    "tsx": "^4.19.2",
     "eslint": "^9.18.0",
-    "typescript-eslint": "^8.21.0",
-    "@eslint/js": "^9.18.0",
     "eslint-config-prettier": "^9.1.0",
-    "prettier": "^3.4.2"
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.21.0"
   }
 }

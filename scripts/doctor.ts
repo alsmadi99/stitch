@@ -5,8 +5,8 @@
  * Usage: npm run doctor
  */
 import { PermissionFlagsBits, type Guild, type GuildBasedChannel } from 'discord.js';
-import type { OAuth2Client } from 'google-auth-library';
 import type { Config } from '../src/config.js';
+import type { YouTubeAuthClient } from '../src/youtube/auth.js';
 
 type Level = 'ok' | 'warn' | 'fail';
 
@@ -28,7 +28,7 @@ function errorMessage(err: unknown): string {
  * carries the userinfo.email scope, so tokens minted before that scope was added
  * simply report nothing rather than failing the check.
  */
-async function authorizedEmail(client: OAuth2Client): Promise<string | null> {
+async function authorizedEmail(client: YouTubeAuthClient): Promise<string | null> {
   try {
     const { token } = await client.getAccessToken();
     if (!token) return null;

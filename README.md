@@ -316,6 +316,31 @@ Other limits worth knowing:
 Dropping to 720p (`OUTPUT_WIDTH=1280`, `OUTPUT_HEIGHT=720`) roughly halves both peak
 memory and encode time.
 
+## What this costs
+
+Nothing. The YouTube Data API v3 is free and does not require a billing account on the
+Google Cloud project — leave billing off and it stays off.
+
+The only limit is quota, and quota is not purchasable. Every project gets 10,000 units
+a day:
+
+| Call                          | Units |
+| ----------------------------- | ----- |
+| `videos.insert` (one upload)  | 1600  |
+| `thumbnails.set`              | 50    |
+| `videos.update` (publish)     | 50    |
+| `channels.list` (doctor)      | 1     |
+
+So six uploads a day is the ceiling, and a normal week — one reel, one thumbnail — uses
+about 1650 of the 10,000. Nowhere near it.
+
+If you exceed the quota, uploads fail with `quotaExceeded` until the daily reset; you
+are never charged. `BACKFILL_MAX_REELS` exists to stop a history drain before it gets
+there. More quota is requested through Google's audit form, not by paying.
+
+Keep the project free by enabling only *YouTube Data API v3*. Other Google Cloud APIs
+can be billable; this one is not.
+
 ## Deploying with Docker
 
 ```bash
@@ -339,6 +364,33 @@ A healthcheck watches a heartbeat file that is only refreshed while the Discord
 gateway is connected, so a wedged websocket is restarted instead of sitting there
 looking alive.
 
+### Dokploy
+
+The bot is a worker, not a web app, but it serves `GET /health` on port 3000 so the
+platform has something to route and poll.
+
+1. **Application → Create → Docker Compose**, pointed at this repository.
+2. **Environment** tab: paste the contents of your `.env` there. Dokploy writes it to a
+   `.env` beside the compose file, which is what `env_file:` picks up. Do not commit
+   `.env` to the repo — it is in `.gitignore` and `.dockerignore` for that reason, and
+   the image never contains it.
+3. **Domains** tab: add `bot.mohammadalsmadi.com` pointing at port **3000**, and delete
+   the `ports:` block from `docker-compose.yml` — Dokploy's proxy reaches the container
+   directly, so publishing on the host only risks a port conflict.
+4. Deploy. Then check `https://bot.mohammadalsmadi.com/health`.
+
+`/health` returns 200 while the Discord gateway is connected and 503 when it is not, so
+it doubles as an uptime check. It exposes only status counters — no clip URLs, no member
+names, no configuration. Set `HTTP_PORT=0` to turn it off entirely if you would rather
+not have it public.
+
+**The OAuth redirect URI does not change.** It is used only by the one-time consent
+flow; the running bot authenticates with the refresh token and never receives a
+redirect. Run `npm run youtube:auth` **on your laptop**, keep
+`http://localhost:8787/oauth2callback` registered in Google Cloud, and paste the
+resulting `YOUTUBE_REFRESH_TOKEN` into Dokploy's Environment tab. Adding
+`bot.mohammadalsmadi.com` as a redirect URI would do nothing.
+
 Run the one-off commands against the running container:
 
 ```bash
@@ -348,6 +400,9 @@ docker compose exec clipreel node dist/scripts/doctor.js
 ```bash
 docker compose exec clipreel node dist/scripts/backfill.js
 ```
+
+On Dokploy use the **Terminal** tab on the application, which drops you into the same
+container.
 
 ## Configuration
 
@@ -373,6 +428,7 @@ ones you are most likely to touch:
 | `INGEST_CONCURRENCY`  | `2`                 | Simultaneous downloads                         |
 | `BACKFILL_MAX_REELS`  | `5`                 | Reels per backfill run, under the daily quota  |
 | `MIN_FREE_DISK_MB`    | `2048`              | Ingest refuses to run below this               |
+| `HTTP_PORT`           | `3000`              | `/health` endpoint; 0 disables it              |
 
 For a vertical Shorts cut, set `OUTPUT_WIDTH=1080`, `OUTPUT_HEIGHT=1920` and
 `MAX_CLIP_SECONDS` low enough to keep the reel under 60s.
@@ -391,6 +447,7 @@ src/
   scheduler/         weekly cron and the threshold check
   drain.ts           full-history backfill driven into 20-clip reels
   heartbeat.ts       liveness file behind the container healthcheck
+  http.ts            GET /health status endpoint
 scripts/
   youtube-auth.ts    one-time consent flow that prints the refresh token
   doctor.ts          checks every integration point, changes nothing
