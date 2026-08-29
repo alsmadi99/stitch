@@ -219,8 +219,13 @@ a redeploy. Re-run the same command; already-scanned messages are skipped and
 already-downloaded clips are still queued.
 
 A backfill runs inside the bot process, so a closed terminal cannot kill it. A
-*container* restart still ends it — it is marked `interrupted` on the next boot, and
-re-running the command continues from the cursor.
+*container* restart does end it — but the next boot marks it `interrupted` and
+automatically re-queues it, continuing from the cursor. A deploy mid-backfill therefore
+costs the current reel's compile and nothing else.
+
+Auto-resume is capped at three consecutive restarts, so a crash loop surfaces instead of
+retrying forever, and a resumed job **never repeats a `--restart`** — re-running the
+reset on every boot would erase the very progress the resume exists to preserve.
 
 Shutdown is deliberately immediate rather than waiting for the current compile: the
 stop grace period is seconds and a compile is minutes, so waiting only delays the
@@ -415,6 +420,25 @@ resolution and number of inputs held open at once:
 Each extra input costs roughly 215 MB at 1080p, because every one keeps its own
 decoder and frame buffers alive for the whole call. Joining 20 clips in a single
 invocation would need about 4.5 GB and get OOM-killed on an 8 GB host.
+
+The trade is time: each tree level is another full encode pass over the reel. Measured
+on 120 s of 1080p30 footage with `FFMPEG_THREADS=2`, intermediates at `ultrafast`:
+
+| Config                    | Passes | Time  | vs realtime |
+| ------------------------- | ------ | ----- | ----------- |
+| `STITCH_BATCH=3`, 1080p   | 4      | 46 s  | 0.38x       |
+| `STITCH_BATCH=5`, 1080p   | 3      | 44 s  | 0.37x       |
+| single pass, 1080p        | 2      | 31 s  | 0.26x       |
+| `STITCH_BATCH=5`, 720p    | 3      | 26 s  | 0.21x       |
+
+Batch size barely matters now that intermediates encode at `ultrafast` — they are
+deleted immediately, so they are tuned for speed rather than size. **Resolution is the
+real lever**: 720p is close to twice as fast and uses half the memory. `MAX_CLIP_SECONDS`
+is the other one, since it caps how much footage a reel contains at all.
+
+These numbers are from a machine with cores to spare. On a container limited to
+`cpus: 2.0`, decoding, filtering and encoding all contend for the same two cores, so
+expect roughly double.
 
 So clips are folded `STITCH_BATCH` at a time into a tree: 20 clips at batch 4 become
 5 segments, then 2, then 1. Peak memory is set by the batch size instead of the reel

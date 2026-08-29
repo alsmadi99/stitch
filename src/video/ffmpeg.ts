@@ -45,12 +45,12 @@ export function threadArgs(): string[] {
  * level plus once during normalize, and compounding the final quality setting three or
  * four times is visible. Only the last pass uses the configured CRF.
  */
-export function encoderArgs(crf = config.video.crf): string[] {
+export function encoderArgs(crf = config.video.crf, preset = config.video.preset): string[] {
   return [
     '-c:v',
     'libx264',
     '-preset',
-    config.video.preset,
+    preset,
     '-crf',
     String(Math.max(0, Math.round(crf))),
     '-pix_fmt',

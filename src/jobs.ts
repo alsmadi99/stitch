@@ -43,7 +43,14 @@ export interface JobState {
   finishedAt?: string;
   progress?: JobProgress;
   detail?: string;
+  /** The originating request, so an interrupted job can be resumed after a restart. */
+  request?: Omit<JobRequest, 'kind' | 'requestedAt'>;
+  /** How many times this job has been auto-resumed, to bound a restart loop. */
+  resumes?: number;
 }
+
+/** Enough restarts to survive a rolling deploy; few enough to expose a crash loop. */
+const MAX_AUTO_RESUMES = 3;
 
 function readJson<T>(key: string): T | null {
   const raw = kvGet(key);
@@ -64,11 +71,20 @@ export function writeJobState(state: JobState): void {
 }
 
 /** Files a request and marks it queued. Called by the CLI, picked up by the bot. */
-export function requestBackfill(request: Omit<JobRequest, 'kind' | 'requestedAt'>): JobState {
+export function requestBackfill(
+  request: Omit<JobRequest, 'kind' | 'requestedAt'>,
+  resumes = 0,
+): JobState {
   const full: JobRequest = { kind: 'backfill', requestedAt: new Date().toISOString(), ...request };
   kvSet(REQUEST_KEY, JSON.stringify(full));
 
-  const state: JobState = { kind: 'backfill', status: 'queued', requestedAt: full.requestedAt };
+  const state: JobState = {
+    kind: 'backfill',
+    status: 'queued',
+    requestedAt: full.requestedAt,
+    request,
+    resumes,
+  };
   writeJobState(state);
   return state;
 }
@@ -100,13 +116,25 @@ export function recoverInterruptedJob(): void {
   const state = readJobState();
   if (!state || (state.status !== 'running' && state.status !== 'queued')) return;
 
+  const resumes = (state.resumes ?? 0) + 1;
+  const canResume = Boolean(state.request) && resumes <= MAX_AUTO_RESUMES;
+
   writeJobState({
     ...state,
     status: 'interrupted',
     finishedAt: new Date().toISOString(),
-    detail: 'stopped by a restart — run the backfill again to continue from the cursor',
+    detail: canResume
+      ? 'stopped by a restart — resuming automatically from the cursor'
+      : 'stopped by a restart — run the backfill again to continue from the cursor',
   });
-  logger.warn({ job: state.kind }, 'marked an interrupted job');
+  logger.warn({ resumes, canResume }, 'marked an interrupted job');
+
+  if (!canResume) return;
+
+  // Never repeat a --restart. It wiped the database once already; doing it again on
+  // every boot would erase the very progress this resume exists to preserve.
+  requestBackfill({ ...state.request!, restart: false }, resumes);
+  logger.info({ resumes }, 'queued an automatic resume of the interrupted backfill');
 }
 
 let busy = false;
@@ -146,6 +174,16 @@ async function runBackfill(client: Client, request: JobRequest): Promise<void> {
   const startedAt = new Date().toISOString();
   let progress: JobProgress = { scanned: 0, accepted: 0, duplicate: 0, rejected: 0, reels: 0 };
 
+  // Carried through every write: without them a restart mid-run would find no request
+  // to resume, which is precisely the case auto-resume exists for. The reset is dropped
+  // here so a resume can never repeat it.
+  const resumes = readJobState()?.resumes ?? 0;
+  const resumable: Omit<JobRequest, 'kind' | 'requestedAt'> = {
+    limit: request.limit,
+    maxReels: request.maxReels,
+    restart: false,
+  };
+
   const publish = (status: JobState['status'], extra: Partial<JobState> = {}) =>
     writeJobState({
       kind: 'backfill',
@@ -153,6 +191,8 @@ async function runBackfill(client: Client, request: JobRequest): Promise<void> {
       requestedAt: request.requestedAt,
       startedAt,
       progress,
+      request: resumable,
+      resumes,
       ...extra,
     });
 

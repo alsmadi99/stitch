@@ -25,8 +25,13 @@ export async function cleanStaleWorkFiles(): Promise<number> {
   return stale.length;
 }
 
-/** Quality used for intermediate stitch levels; only the final pass uses X264_CRF. */
+/**
+ * Intermediate stitch levels are deleted as soon as the next level consumes them, so
+ * they are tuned for speed, not size: a fast preset and a high-quality CRF. Only the
+ * final pass uses the configured preset and CRF.
+ */
 const INTERMEDIATE_CRF = 16;
+const INTERMEDIATE_PRESET = 'ultrafast';
 
 export interface CompileResult {
   videoPath: string;
@@ -88,13 +93,19 @@ export async function compileReel(
     // The last level produces the file that ships, so it gets the configured quality.
     const isFinalLevel = batches.length === 1;
     const crf = isFinalLevel ? config.video.crf : INTERMEDIATE_CRF;
+    const preset = isFinalLevel ? config.video.preset : INTERMEDIATE_PRESET;
 
     const next: Segment[] = [];
     for (const [i, batch] of batches.entries()) {
-      next.push(await stitchBatch(batch, transition, reelId, level, i, crf));
+      next.push(await stitchBatch(batch, transition, reelId, level, i, crf, preset));
     }
 
-    await removeTemporary(segments);
+    // A batch of one is passed straight through, so that file is still live at the next
+    // level. Deleting it as part of "the previous level" would pull the input out from
+    // under the very next ffmpeg call.
+    const carried = new Set(next.map((s) => s.file));
+    await removeTemporary(segments.filter((s) => !carried.has(s.file)));
+
     segments = next;
     level++;
   }
@@ -148,11 +159,12 @@ async function stitchBatch(
   level: number,
   index: number,
   crf: number,
+  preset: string,
 ): Promise<Segment> {
   if (batch.length === 1) return batch[0]!;
 
   const out = path.join(config.paths.workDir, `stitch-${reelId}-l${level}-${index}.mp4`);
-  await ffmpeg(buildStitchArgs(batch, transition, out, crf), { timeoutMs: 60 * 60_000 });
+  await ffmpeg(buildStitchArgs(batch, transition, out, crf, preset), { timeoutMs: 60 * 60_000 });
 
   return {
     file: out,
@@ -162,7 +174,13 @@ async function stitchBatch(
   };
 }
 
-function buildStitchArgs(segments: Segment[], transition: number, out: string, crf: number): string[] {
+function buildStitchArgs(
+  segments: Segment[],
+  transition: number,
+  out: string,
+  crf: number,
+  preset: string,
+): string[] {
   const args: string[] = ['-y', ...threadArgs()];
   for (const segment of segments) args.push('-i', segment.file);
 
@@ -196,7 +214,7 @@ function buildStitchArgs(segments: Segment[], transition: number, out: string, c
     `[${videoLabel}]`,
     '-map',
     `[${audioLabel}]`,
-    ...encoderArgs(crf),
+    ...encoderArgs(crf, preset),
     out,
   );
 
