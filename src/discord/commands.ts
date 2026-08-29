@@ -14,7 +14,7 @@ import { config } from '../config.js';
 import { logger } from '../logger.js';
 import * as clipsRepo from '../db/clips.js';
 import * as reelsRepo from '../db/reels.js';
-import { isRunning, runPipeline } from '../pipeline.js';
+import { isCompilingAnywhere, isRunning, runPipeline } from '../pipeline.js';
 import { setPrivacy } from '../youtube/upload.js';
 
 /**
@@ -122,7 +122,7 @@ async function handleClips(interaction: ChatInputCommandInteraction): Promise<vo
   const last = reelsRepo.latestReel();
   const lines = [
     `**${pending}** clip${pending === 1 ? '' : 's'} queued (reel fires at ${config.trigger.maxClips}).`,
-    isRunning() ? 'A reel is compiling right now.' : null,
+    isCompilingAnywhere() ? 'A reel is compiling right now.' : null,
     last
       ? `Last reel: #${last.id} — ${last.status}${last.youtube_url ? ` — ${last.youtube_url}` : ''}`
       : 'No reels yet.',

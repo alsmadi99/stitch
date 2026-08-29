@@ -106,9 +106,24 @@ deleted once its reel is uploaded.
 Position is checkpointed after every page and before every compile, so the run is safe
 to stop, restart, or redeploy mid-way — it resumes instead of re-downloading.
 
+Re-read the channel from its first message while keeping the database — already-seen
+clips are skipped, so this costs API calls and nothing else:
+
+```bash
+npm run backfill -- --rescan
+```
+
+Start completely over. **Destructive**: wipes the clip queue, the reel history, the
+cursor, and every downloaded and generated file, then walks the channel from scratch:
+
 ```bash
 npm run backfill -- --restart
 ```
+
+It prints what it is about to delete and waits 8 seconds first; `--force` skips the
+wait. The one thing it cannot undo is YouTube — videos already uploaded stay up, and
+because the record of what was published is part of what gets deleted, a backfill after
+a reset **will upload those clips again**. Episode numbering restarts at #1.
 
 ```bash
 npm run backfill -- --limit 500 --reels 2
@@ -179,6 +194,27 @@ What actually happens if you deploy mid-run:
 A backfill is a one-off command, not a service, so it does **not** restart itself after
 a redeploy. Re-run the same command; already-scanned messages are skipped and
 already-downloaded clips are still queued.
+
+### Running a backfill that outlives your terminal
+
+A full history walk runs for hours. Started from an interactive container shell it is a
+child of that shell, so detach it explicitly rather than trusting the terminal to stay
+open:
+
+```bash
+setsid nohup node dist/scripts/backfill.js >> /app/data/backfill.log 2>&1 &
+```
+
+`setsid` detaches it from the terminal's session, `nohup` ignores the hangup, and the
+redirect moves its output off the pty and into the data volume where you can tail it.
+Then watch it with:
+
+```bash
+tail -f /app/data/backfill.log
+```
+
+It still dies if the *container* restarts — it is not the container's main process — but
+the cursor means re-running continues where it stopped.
 
 Shutdown is deliberately immediate rather than waiting for the current compile: the
 stop grace period is seconds and a compile is minutes, so waiting only delays the

@@ -1,4 +1,6 @@
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import path from 'node:path';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import * as clipsRepo from './db/clips.js';
@@ -51,8 +53,73 @@ export interface RunResult {
 // time — a threshold trigger firing during the weekly run must not start a second.
 let running = false;
 
+const LOCK_FILE = path.join(config.paths.dataDir, 'compile.lock');
+
+/** True when *this* process is compiling. */
 export function isRunning(): boolean {
   return running;
+}
+
+/**
+ * True when any process on this data volume is compiling — this one, the bot, or a
+ * backfill started from a shell. Status readouts have to use this rather than the
+ * in-process flag, or the bot cheerfully reports "idle" while a backfill it cannot see
+ * is pinning both cores.
+ */
+export function isCompilingAnywhere(): boolean {
+  if (running) return true;
+  try {
+    const holder = Number(fs.readFileSync(LOCK_FILE, 'utf8').trim());
+    return Number.isFinite(holder) && holder > 0 && isAlive(holder);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Cross-process guard on top of the in-process flag.
+ *
+ * The bot and a manually started backfill are separate processes sharing one data
+ * volume, so the boolean above cannot see the other one. Two concurrent compiles would
+ * double peak memory on a host sized for exactly one, and race to upload reels built
+ * from overlapping clips.
+ *
+ * A lock left behind by a killed process is taken over once its pid is gone.
+ */
+function acquireLock(): boolean {
+  try {
+    fs.writeFileSync(LOCK_FILE, String(process.pid), { flag: 'wx' });
+    return true;
+  } catch {
+    const holder = Number(fs.readFileSync(LOCK_FILE, 'utf8').trim());
+
+    if (Number.isFinite(holder) && holder > 0 && isAlive(holder)) {
+      logger.warn({ holder }, 'another process is compiling — skipping');
+      return false;
+    }
+
+    logger.warn({ holder }, 'took over a stale compile lock');
+    fs.writeFileSync(LOCK_FILE, String(process.pid));
+    return true;
+  }
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    // Signal 0 performs the permission and existence check without delivering anything.
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+function releaseLock(): void {
+  try {
+    fs.rmSync(LOCK_FILE, { force: true });
+  } catch {
+    // Nothing useful to do; a stale lock is taken over on the next run.
+  }
 }
 
 export async function runPipeline(trigger: Trigger): Promise<RunResult> {
@@ -67,6 +134,8 @@ export async function runPipeline(trigger: Trigger): Promise<RunResult> {
   if (pending < floor) {
     return { status: 'skipped', reason: `${pending} clips pending, need ${floor}` };
   }
+
+  if (!acquireLock()) return { status: 'busy' };
 
   running = true;
   const batch = clipsRepo.takePending(config.trigger.maxClips);
@@ -139,6 +208,7 @@ export async function runPipeline(trigger: Trigger): Promise<RunResult> {
     throw err;
   } finally {
     running = false;
+    releaseLock();
   }
 }
 

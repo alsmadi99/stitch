@@ -3,7 +3,7 @@ import { config } from './config.js';
 import { logger } from './logger.js';
 import { countPending } from './db/clips.js';
 import { latestReel } from './db/reels.js';
-import { isRunning } from './pipeline.js';
+import { isCompilingAnywhere } from './pipeline.js';
 
 /**
  * A tiny status endpoint. The bot is a worker with no web surface of its own, but a
@@ -29,7 +29,7 @@ export function startHttpServer(isConnected: () => boolean): http.Server | null 
           status: connected ? 'ok' : 'disconnected',
           uptimeSeconds: Math.round(process.uptime()),
           discord: connected,
-          compiling: isRunning(),
+          compiling: isCompilingAnywhere(),
           queued: countPending(),
           lastReel: latestReel()?.status ?? null,
         }),
