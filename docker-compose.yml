@@ -1,0 +1,78 @@
+# Sized for a small host. Measured peak RSS of the stitch step, which dominates
+# everything else the bot does:
+#
+#   1080p, 3 inputs   ~1030 MB      720p, 3 inputs   ~495 MB
+#   1080p, 4 inputs   ~1200 MB      720p, 4 inputs   ~615 MB
+#   1080p, 5 inputs   ~1450 MB      720p, 5 inputs   ~705 MB
+#
+# STITCH_BATCH controls how many segments one ffmpeg call holds open at once, so it is
+# the memory dial. A single call with all 20 clips would need roughly 4.5 GB and get
+# OOM-killed on an 8 GB box — hence the batching.
+#
+# The defaults below are 1080p with STITCH_BATCH=3, peaking near 1.2 GB including Node.
+# For half the memory, uncomment the 720p block.
+
+services:
+  clipreel:
+    build: .
+    container_name: clipreel
+    restart: unless-stopped
+    env_file: .env
+
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-UTC}
+      # Node itself never holds video in memory; ffmpeg is a separate process.
+      NODE_OPTIONS: --max-old-space-size=256
+
+      # --- resource dials ---
+      STITCH_BATCH: 3
+      FFMPEG_THREADS: 2
+      INGEST_CONCURRENCY: 1
+      X264_PRESET: veryfast
+
+      # --- 720p alternative: halves peak memory and roughly halves encode time ---
+      # OUTPUT_WIDTH: 1280
+      # OUTPUT_HEIGHT: 720
+      # STITCH_BATCH: 5
+
+      # --- disk ---
+      # Discord's own upload cap is 500 MB with Nitro; 200 MB skips the rare huge file.
+      MAX_DOWNLOAD_BYTES: 209715200
+      # Refuse to start a download below this much free space on the volume.
+      MIN_FREE_DISK_MB: 3072
+      # Delete source clips once their reel is uploaded — important for long backfills.
+      CLEANUP_SOURCES: "true"
+
+      # --- backfill pacing ---
+      # YouTube allows 10,000 quota units/day and an upload costs 1,600, so six uploads
+      # is the hard daily ceiling. Five leaves room for the API calls around them.
+      BACKFILL_MAX_REELS: 5
+
+    volumes:
+      # SQLite database, downloaded clips, finished reels. Back this up.
+      - ./data:/app/data
+
+    deploy:
+      resources:
+        limits:
+          # Above the measured 1080p/batch-3 peak with headroom for Node and the OS.
+          memory: 1536M
+          cpus: "2.0"
+        reservations:
+          memory: 256M
+
+    # Compose v2 standalone ignores deploy.resources; these are the equivalent.
+    mem_limit: 1536m
+    mem_reservation: 256m
+    cpus: 2.0
+
+    # ffmpeg is the only thing that should ever be slow. Keeping it off the CPU when
+    # something else on the host needs it costs a few minutes on a weekly job.
+    cpu_shares: 512
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

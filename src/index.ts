@@ -4,6 +4,7 @@ import { client, login } from './discord/client.js';
 import { registerCollector } from './discord/collector.js';
 import { deployCommands, registerCommands } from './discord/commands.js';
 import { hasYtDlp } from './ingest/download.js';
+import { beat } from './heartbeat.js';
 import { maybeRunOnThreshold, startScheduler } from './scheduler/index.js';
 import { db } from './db/index.js';
 
@@ -29,6 +30,14 @@ async function main(): Promise<void> {
   await login();
   await deployCommands();
   startScheduler();
+
+  // Heartbeat for the container healthcheck. Tied to the gateway rather than a bare
+  // timer so a dead websocket actually shows up as unhealthy.
+  beat();
+  const heartbeat = setInterval(() => {
+    if (client.isReady()) beat();
+  }, 30_000);
+  heartbeat.unref();
 
   logger.info('ready');
 }

@@ -183,13 +183,55 @@ if (!config.youtube.enabled) {
         'ok',
         `uploading to "${channel.snippet?.title}"${who ? ` (${who})` : ''} as ${config.youtube.privacy}`,
       );
-      if (config.youtube.privacy === 'public' && !config.youtube.autoPublish) {
-        add('youtube publish', 'warn', 'PRIVACY=public but AUTO_PUBLISH=false — unverified projects are locked to private anyway');
+      // A channel flagged as made-for-kids has personalised ads disabled on every
+      // upload, which is the usual reason monetization silently never turns on.
+      if (channel.status?.madeForKids) {
+        add('youtube audience', 'warn', 'channel is set to "made for kids" — that disables monetization on every upload');
+      }
+
+      // 20 clips at the default 60s cap is a 20 minute video; unverified channels are
+      // capped at 15 minutes and the upload fails outright.
+      const longUploads = channel.status?.longUploadsStatus;
+      if (longUploads !== 'allowed') {
+        const maxReel = (config.trigger.maxClips * config.video.maxClipSeconds) / 60;
+        add(
+          'youtube long uploads',
+          maxReel > 15 ? 'fail' : 'warn',
+          `longUploadsStatus=${longUploads ?? 'unknown'} — videos over 15 minutes are rejected, and this config can produce ${Math.round(maxReel)} minutes. Verify the channel at youtube.com/verify.`,
+        );
       }
     }
   } catch (err) {
     add('youtube', 'fail', errorMessage(err));
   }
+}
+
+// ---------------------------------------------------------------- metadata
+
+{
+  const { buildTitle, buildDescription, buildTags } = await import('../src/youtube/metadata.js');
+  const sequence = (await import('../src/db/reels.js')).completedReelCount() + 1;
+  const title = buildTitle(sequence, config.trigger.maxClips);
+
+  if (config.youtube.titleTemplate.includes('{n}')) {
+    add('title template', 'ok', title);
+  } else {
+    // Almost always dotenv eating `#{n}` as a comment in an unquoted .env value.
+    add(
+      'title template',
+      'warn',
+      `no {n} in YOUTUBE_TITLE_TEMPLATE — the thumbnail shows #${sequence} but the title will not. ` +
+        'If your template contains a #, wrap the whole value in double quotes in .env.',
+    );
+  }
+
+  const hashtagCount = (buildDescription(sequence, title).match(/#\w+/g) ?? []).length;
+  const titleTags = (title.match(/#\w+/g) ?? []).length;
+  add(
+    'description',
+    hashtagCount + titleTags > 15 ? 'fail' : 'ok',
+    `${hashtagCount} hashtags in the description + ${titleTags} in the title (limit 15 combined), ${buildTags().length} tags`,
+  );
 }
 
 // ---------------------------------------------------------------- report

@@ -2,33 +2,46 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
+import { probe } from '../ingest/probe.js';
 import type { ClipRow } from '../types.js';
-import { ffmpeg } from './ffmpeg.js';
+import { encoderArgs, ffmpeg, threadArgs } from './ffmpeg.js';
 import { normalizeClip, type NormalizedClip } from './normalize.js';
+import { generateThumbnail } from './thumbnail.js';
 
-export interface Chapter {
-  clipId: number;
-  authorName: string;
-  /** Seconds from the start of the reel. */
-  start: number;
-}
+/** Quality used for intermediate stitch levels; only the final pass uses X264_CRF. */
+const INTERMEDIATE_CRF = 16;
 
 export interface CompileResult {
   videoPath: string;
   thumbnailPath: string;
   duration: number;
   clipIds: number[];
-  chapters: Chapter[];
+}
+
+/** A piece of the reel — one normalized clip, or several already stitched together. */
+interface Segment {
+  file: string;
+  duration: number;
+  /** How many source clips it contains, used only to keep transitions varied. */
+  clips: number;
+  /** Intermediate files get deleted; normalized inputs are cleaned up separately. */
+  temporary: boolean;
 }
 
 /**
  * Normalizes every clip, then stitches them with a crossfade between each pair.
  *
- * xfade overlaps the two inputs, so joining N clips yields
- * `sum(durations) - (N - 1) * transition` seconds, and the offset for the k-th join is
- * `sum(durations[0..k-1]) - k * transition`.
+ * Stitching happens in small batches rather than one ffmpeg call per reel. A single
+ * call with 20 inputs keeps 20 decoders and their frame buffers alive at once, which
+ * runs to well over a gigabyte at 1080p — enough to get the process OOM-killed on a
+ * small VPS. Folding `STITCH_BATCH` segments at a time caps peak memory at roughly
+ * that many decoders, at the cost of one extra encode pass per tree level.
  */
-export async function compileReel(reelId: number, clips: ClipRow[]): Promise<CompileResult> {
+export async function compileReel(
+  reelId: number,
+  clips: ClipRow[],
+  sequence: number,
+): Promise<CompileResult> {
   if (clips.length === 0) throw new Error('nothing to compile');
 
   const log = logger.child({ reelId });
@@ -43,50 +56,48 @@ export async function compileReel(reelId: number, clips: ClipRow[]): Promise<Com
   const videoPath = path.join(config.paths.outDir, `reel-${reelId}.mp4`);
   const transition = pickTransitionDuration(normalized);
 
-  if (normalized.length === 1) {
-    await fsp.copyFile(normalized[0]!.file, videoPath);
-  } else {
-    await ffmpeg(buildStitchArgs(normalized, transition, videoPath), { timeoutMs: 60 * 60_000 });
+  let segments: Segment[] = normalized.map((c) => ({
+    file: c.file,
+    duration: c.duration,
+    clips: 1,
+    temporary: false,
+  }));
+
+  let level = 0;
+  while (segments.length > 1) {
+    const batches = chunk(segments, config.video.stitchBatch);
+    log.info({ level, segments: segments.length, batches: batches.length }, 'stitching');
+
+    // The last level produces the file that ships, so it gets the configured quality.
+    const isFinalLevel = batches.length === 1;
+    const crf = isFinalLevel ? config.video.crf : INTERMEDIATE_CRF;
+
+    const next: Segment[] = [];
+    for (const [i, batch] of batches.entries()) {
+      next.push(await stitchBatch(batch, transition, reelId, level, i, crf));
+    }
+
+    await removeTemporary(segments);
+    segments = next;
+    level++;
   }
 
-  const duration =
-    normalized.reduce((sum, c) => sum + c.duration, 0) - (normalized.length - 1) * transition;
+  const final = segments[0]!;
+  await fsp.rename(final.file, videoPath).catch(async () => {
+    // rename fails across devices; fall back to a copy.
+    await fsp.copyFile(final.file, videoPath);
+    await fsp.rm(final.file, { force: true });
+  });
 
-  const thumbnailPath = await grabThumbnail(videoPath, reelId, duration);
-  const chapters = buildChapters(normalized, clips, transition);
+  // Measured rather than predicted: every encode pass can drift by a frame or two.
+  const duration = (await probe(videoPath)).duration;
+
+  const thumbnailPath = await generateThumbnail(videoPath, duration, reelId, sequence);
   await cleanupWorkFiles(normalized);
 
-  log.info({ duration: Math.round(duration), videoPath }, 'reel compiled');
+  log.info({ duration: Math.round(duration), levels: level, videoPath }, 'reel compiled');
 
-  return {
-    videoPath,
-    thumbnailPath,
-    duration,
-    clipIds: normalized.map((c) => c.clipId),
-    chapters,
-  };
-}
-
-/** Where each clip lands in the finished reel — same arithmetic as the xfade offsets. */
-function buildChapters(
-  normalized: NormalizedClip[],
-  clips: ClipRow[],
-  transition: number,
-): Chapter[] {
-  const byId = new Map(clips.map((c) => [c.id, c]));
-  const chapters: Chapter[] = [];
-  let start = 0;
-
-  for (const [k, clip] of normalized.entries()) {
-    chapters.push({
-      clipId: clip.clipId,
-      authorName: byId.get(clip.clipId)?.author_name ?? 'unknown',
-      start: k === 0 ? 0 : start,
-    });
-    start += clip.duration - transition;
-  }
-
-  return chapters;
+  return { videoPath, thumbnailPath, duration, clipIds: normalized.map((c) => c.clipId) };
 }
 
 /** A crossfade longer than half the shortest clip would swallow it whole. */
@@ -103,29 +114,62 @@ function pickTransitionDuration(clips: NormalizedClip[]): number {
   return chosen;
 }
 
-function buildStitchArgs(clips: NormalizedClip[], transition: number, out: string): string[] {
-  const args: string[] = ['-y'];
-  for (const clip of clips) args.push('-i', clip.file);
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Joins one batch into a single file. A batch of one is passed through untouched so a
+ * leftover segment never picks up a pointless extra encode.
+ */
+async function stitchBatch(
+  batch: Segment[],
+  transition: number,
+  reelId: number,
+  level: number,
+  index: number,
+  crf: number,
+): Promise<Segment> {
+  if (batch.length === 1) return batch[0]!;
+
+  const out = path.join(config.paths.workDir, `stitch-${reelId}-l${level}-${index}.mp4`);
+  await ffmpeg(buildStitchArgs(batch, transition, out, crf), { timeoutMs: 60 * 60_000 });
+
+  return {
+    file: out,
+    duration: (await probe(out)).duration,
+    clips: batch.reduce((n, s) => n + s.clips, 0),
+    temporary: true,
+  };
+}
+
+function buildStitchArgs(segments: Segment[], transition: number, out: string, crf: number): string[] {
+  const args: string[] = ['-y', ...threadArgs()];
+  for (const segment of segments) args.push('-i', segment.file);
 
   const filters: string[] = [];
   let videoLabel = '0:v';
   let audioLabel = '0:a';
-  let elapsed = clips[0]!.duration;
+  let elapsed = segments[0]!.duration;
+  // Keep the transition variety walking across the whole reel rather than resetting
+  // to the first transition inside every batch.
+  let joinIndex = segments[0]!.clips - 1;
 
-  for (let k = 1; k < clips.length; k++) {
+  for (let k = 1; k < segments.length; k++) {
     const offset = elapsed - transition;
-    const name = config.video.transitions[(k - 1) % config.video.transitions.length] ?? 'fade';
-    const nextV = `v${k}`;
-    const nextA = `a${k}`;
+    const name = config.video.transitions[joinIndex % config.video.transitions.length] ?? 'fade';
 
     filters.push(
-      `[${videoLabel}][${k}:v]xfade=transition=${name}:duration=${transition.toFixed(3)}:offset=${offset.toFixed(3)}[${nextV}]`,
-      `[${audioLabel}][${k}:a]acrossfade=d=${transition.toFixed(3)}:c1=tri:c2=tri[${nextA}]`,
+      `[${videoLabel}][${k}:v]xfade=transition=${name}:duration=${transition.toFixed(3)}:offset=${offset.toFixed(3)}[v${k}]`,
+      `[${audioLabel}][${k}:a]acrossfade=d=${transition.toFixed(3)}:c1=tri:c2=tri[a${k}]`,
     );
 
-    videoLabel = nextV;
-    audioLabel = nextA;
-    elapsed += clips[k]!.duration - transition;
+    videoLabel = `v${k}`;
+    audioLabel = `a${k}`;
+    elapsed += segments[k]!.duration - transition;
+    joinIndex += segments[k]!.clips;
   }
 
   args.push(
@@ -135,54 +179,28 @@ function buildStitchArgs(clips: NormalizedClip[], transition: number, out: strin
     `[${videoLabel}]`,
     '-map',
     `[${audioLabel}]`,
-    '-c:v',
-    'libx264',
-    '-preset',
-    config.video.preset,
-    '-crf',
-    String(config.video.crf),
-    '-pix_fmt',
-    'yuv420p',
-    '-r',
-    String(config.video.fps),
-    '-c:a',
-    'aac',
-    '-b:a',
-    '192k',
-    '-ar',
-    '48000',
-    '-ac',
-    '2',
-    '-movflags',
-    '+faststart',
+    ...encoderArgs(crf),
     out,
   );
 
   return args;
 }
 
-async function grabThumbnail(video: string, reelId: number, duration: number): Promise<string> {
-  const out = path.join(config.paths.outDir, `reel-${reelId}.jpg`);
-  await ffmpeg([
-    '-y',
-    '-ss',
-    Math.max(0, duration * 0.35).toFixed(2),
-    '-i',
-    video,
-    '-frames:v',
-    '1',
-    '-q:v',
-    '2',
-    out,
-  ]);
-  return out;
+async function removeTemporary(segments: Segment[]): Promise<void> {
+  await Promise.all(
+    segments
+      .filter((s) => s.temporary)
+      .map((s) => fsp.rm(s.file, { force: true }).catch(() => undefined)),
+  );
 }
 
 async function cleanupWorkFiles(clips: NormalizedClip[]): Promise<void> {
   await Promise.all(
     clips.flatMap((c) => [
       fsp.rm(c.file, { force: true }).catch(() => undefined),
-      fsp.rm(path.join(config.paths.workDir, `label-${c.clipId}.txt`), { force: true }).catch(() => undefined),
+      fsp
+        .rm(path.join(config.paths.workDir, `label-${c.clipId}.txt`), { force: true })
+        .catch(() => undefined),
     ]),
   );
 }

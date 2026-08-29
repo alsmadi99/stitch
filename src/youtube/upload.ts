@@ -8,6 +8,7 @@ export interface UploadInput {
   thumbnailPath?: string;
   title: string;
   description: string;
+  tags: string[];
 }
 
 export interface UploadResult {
@@ -37,7 +38,7 @@ export async function uploadReel(input: UploadInput): Promise<UploadResult> {
         snippet: {
           title: input.title,
           description: input.description,
-          tags: [...config.youtube.tags],
+          tags: input.tags,
           categoryId: config.youtube.categoryId,
         },
         status: {
@@ -79,7 +80,20 @@ export async function uploadReel(input: UploadInput): Promise<UploadResult> {
   };
 }
 
-/** Used by the Discord approve button to take a private upload public. */
+/**
+ * YouTube allows 10,000 quota units a day and charges 1,600 for an upload, so the
+ * seventh upload in 24 hours fails. Recognising it lets a long backfill stop cleanly
+ * and resume tomorrow instead of burning through the rest of the queue on errors.
+ */
+export function isQuotaError(err: unknown): boolean {
+  if (!err) return false;
+  const record = err as { errors?: { reason?: string }[]; code?: number; message?: string };
+  const reasons = record.errors?.map((e) => e.reason ?? '') ?? [];
+  if (reasons.some((r) => /quotaExceeded|dailyLimitExceeded|rateLimitExceeded/i.test(r))) return true;
+  return /quota|dailyLimit/i.test(record.message ?? '');
+}
+
+/** Manual escape hatch for taking a private upload public. */
 export async function setPrivacy(
   videoId: string,
   privacy: 'private' | 'unlisted' | 'public',

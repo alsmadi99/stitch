@@ -16,11 +16,13 @@ const num = (def: number) =>
     .transform((v) => (v === undefined || v === '' ? def : Number(v)))
     .pipe(z.number().finite());
 
+// An empty value means "unset", not "empty string" — dotenv yields '' for a bare key,
+// and for a value like `#E62117` where it strips everything after the # as a comment.
 const str = (def = '') =>
   z
     .string()
     .optional()
-    .transform((v) => (v === undefined ? def : v.trim()));
+    .transform((v) => (v === undefined || v.trim() === '' ? def : v.trim()));
 
 const csv = (def: string[] = []) =>
   z
@@ -54,15 +56,23 @@ const schema = z.object({
   TRANSITIONS: csv(['fade', 'wipeleft', 'slideup', 'circleopen', 'dissolve']),
   MAX_CLIP_SECONDS: num(60),
   MIN_CLIP_SECONDS: num(2),
-  TITLE_CARDS: bool(true),
+  TITLE_CARDS: bool(false),
   TITLE_CARD_SECONDS: num(3),
   FONT_FILE: str(),
   X264_PRESET: str('veryfast'),
   X264_CRF: num(20),
+  FFMPEG_THREADS: num(0),
+  STITCH_BATCH: num(4),
 
-  MAX_DOWNLOAD_BYTES: num(524_288_000),
+  THUMBNAIL_LABEL: str('GAMING CLIPS'),
+  THUMBNAIL_ACCENT: str('0xE62117'),
+
+  MAX_DOWNLOAD_BYTES: num(209_715_200),
   ALLOW_LINKS: bool(true),
   PHASH_THRESHOLD: num(8),
+  MIN_FREE_DISK_MB: num(2048),
+  INGEST_CONCURRENCY: num(2),
+  BACKFILL_MAX_REELS: num(5),
 
   YOUTUBE_CLIENT_ID: str(),
   YOUTUBE_CLIENT_SECRET: str(),
@@ -73,8 +83,49 @@ const schema = z.object({
     .transform((v) => (v === undefined || v.trim() === '' ? 'private' : v.trim()))
     .pipe(z.enum(['private', 'unlisted', 'public'])),
   YOUTUBE_AUTO_PUBLISH: bool(false),
-  YOUTUBE_TITLE_TEMPLATE: str('Best Gaming Clips #{n} — {month} {year}'),
-  YOUTUBE_TAGS: csv(['gaming', 'clips', 'montage']),
+  YOUTUBE_TITLE_TEMPLATE: str('Discord Gaming Clips #{n} | CS2, Rocket League, LoL & More'),
+  YOUTUBE_GAMES: csv([
+    'CS2',
+    'Rocket League',
+    'League of Legends',
+    'Rust',
+    'Valorant',
+    'Fortnite',
+    'GTA V',
+    'Minecraft',
+    'Apex Legends',
+    'Call of Duty',
+  ]),
+  YOUTUBE_HASHTAGS: csv([
+    'gaming',
+    'funny',
+    'clips',
+    'arabic',
+    'cs2',
+    'rocketleague',
+    'leagueoflegends',
+    'rust',
+    'valorant',
+    'fortnite',
+    'gameplay',
+    'montage',
+    'fails',
+    'highlights',
+  ]),
+  YOUTUBE_DESCRIPTION: str(),
+  YOUTUBE_TAGS: csv([
+    'gaming clips',
+    'funny gaming moments',
+    'variety gaming',
+    'cs2 clips',
+    'rocket league clips',
+    'league of legends clips',
+    'rust clips',
+    'gaming montage',
+    'discord clips',
+    'gaming highlights',
+    'arabic gaming',
+  ]),
   YOUTUBE_CATEGORY_ID: str('20'),
 
   LOG_LEVEL: str('info'),
@@ -121,11 +172,21 @@ export const config = {
     fontFile: env.FONT_FILE || undefined,
     preset: env.X264_PRESET,
     crf: env.X264_CRF,
+    threads: env.FFMPEG_THREADS,
+    stitchBatch: Math.max(2, env.STITCH_BATCH),
+  },
+  thumbnail: {
+    label: env.THUMBNAIL_LABEL,
+    // ffmpeg accepts #RRGGBB, but 0x form avoids any ambiguity inside a filtergraph.
+    accent: env.THUMBNAIL_ACCENT.replace(/^#/, '0x'),
   },
   ingest: {
     maxDownloadBytes: env.MAX_DOWNLOAD_BYTES,
     allowLinks: env.ALLOW_LINKS,
     phashThreshold: env.PHASH_THRESHOLD,
+    minFreeDiskMb: env.MIN_FREE_DISK_MB,
+    concurrency: Math.max(1, env.INGEST_CONCURRENCY),
+    backfillMaxReels: env.BACKFILL_MAX_REELS,
   },
   youtube: {
     clientId: env.YOUTUBE_CLIENT_ID,
@@ -134,6 +195,9 @@ export const config = {
     privacy: env.YOUTUBE_PRIVACY,
     autoPublish: env.YOUTUBE_AUTO_PUBLISH,
     titleTemplate: env.YOUTUBE_TITLE_TEMPLATE,
+    games: env.YOUTUBE_GAMES,
+    hashtags: env.YOUTUBE_HASHTAGS,
+    description: env.YOUTUBE_DESCRIPTION,
     tags: env.YOUTUBE_TAGS,
     categoryId: env.YOUTUBE_CATEGORY_ID,
     enabled: Boolean(env.YOUTUBE_CLIENT_ID && env.YOUTUBE_CLIENT_SECRET && env.YOUTUBE_REFRESH_TOKEN),

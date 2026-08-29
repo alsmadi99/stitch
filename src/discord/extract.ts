@@ -4,7 +4,11 @@ import type { Candidate } from '../types.js';
 
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.webm', '.mkv', '.m4v', '.avi']);
 
-/** Hosts yt-dlp handles well and that people actually post clips from. */
+/**
+ * Hosts yt-dlp handles well and that people actually post clips from. Deliberately
+ * excludes image hosts like imgur — a link there is far more often a screenshot, and
+ * every one would cost a download and a probe before being thrown away.
+ */
 const LINK_HOSTS = [
   'medal.tv',
   'streamable.com',
@@ -13,8 +17,6 @@ const LINK_HOSTS = [
   'youtube.com',
   'youtu.be',
   'outplayed.tv',
-  'gfycat.com',
-  'imgur.com',
 ];
 
 const URL_RE = /https?:\/\/[^\s<>|]+/gi;
@@ -28,8 +30,13 @@ function isSupportedHost(raw: string): boolean {
   }
 }
 
+/**
+ * Images, screenshots, text files and everything else in the channel are ignored here,
+ * before anything is downloaded. Discord reports a content type for most uploads; the
+ * extension check is the fallback for the ones it does not.
+ */
 function looksLikeVideoAttachment(name: string, contentType: string | null): boolean {
-  if (contentType?.startsWith('video/')) return true;
+  if (contentType) return contentType.startsWith('video/');
   const dot = name.lastIndexOf('.');
   return dot !== -1 && VIDEO_EXTENSIONS.has(name.slice(dot).toLowerCase());
 }

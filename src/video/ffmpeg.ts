@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
+import { config } from '../config.js';
 import { logger } from '../logger.js';
 
 // ffmpeg-static's default export is the binary path, but its bundled .d.ts declares a
@@ -10,6 +11,47 @@ const bundledFfmpeg = ffmpegStatic as unknown as string | null;
 
 export const FFMPEG = process.env.FFMPEG_PATH || bundledFfmpeg || 'ffmpeg';
 export const FFPROBE = process.env.FFPROBE_PATH || ffprobeStatic.path || 'ffprobe';
+
+/**
+ * Caps ffmpeg's own threading. Left at 0 (auto) it spawns one worker per core and will
+ * happily saturate a small VPS while the bot still needs to answer the gateway.
+ */
+export function threadArgs(): string[] {
+  const { threads } = config.video;
+  return threads > 0 ? ['-threads', String(threads), '-filter_threads', String(threads)] : [];
+}
+
+/**
+ * The output codec settings every stage shares, so batches stay compatible.
+ *
+ * Intermediate stitch levels pass a lower CRF: footage is re-encoded once per tree
+ * level plus once during normalize, and compounding the final quality setting three or
+ * four times is visible. Only the last pass uses the configured CRF.
+ */
+export function encoderArgs(crf = config.video.crf): string[] {
+  return [
+    '-c:v',
+    'libx264',
+    '-preset',
+    config.video.preset,
+    '-crf',
+    String(Math.max(0, Math.round(crf))),
+    '-pix_fmt',
+    'yuv420p',
+    '-r',
+    String(config.video.fps),
+    '-c:a',
+    'aac',
+    '-b:a',
+    '192k',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
+    '-movflags',
+    '+faststart',
+  ];
+}
 
 export class FfmpegError extends Error {
   constructor(
@@ -86,15 +128,6 @@ export function ffprobe(args: string[]): Promise<RunResult> {
  */
 export function escapeFilterPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/:/g, '\\:');
-}
-
-/** drawtext refuses most punctuation unless escaped. */
-export function escapeDrawText(text: string): string {
-  return text
-    .replace(/\\/g, '\\\\')
-    .replace(/:/g, '\\:')
-    .replace(/'/g, "\u2019")
-    .replace(/%/g, '\\%');
 }
 
 const FONT_CANDIDATES = [

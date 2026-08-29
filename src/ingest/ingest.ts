@@ -11,6 +11,24 @@ import { fingerprintDistance, sha256File, videoFingerprint } from './fingerprint
 
 export const ingestEvents = new EventEmitter();
 
+export class DiskFullError extends Error {}
+
+/**
+ * Refuses to start a download when the data volume is nearly full. Without this a long
+ * backfill quietly fills the disk and takes the rest of the host down with it.
+ */
+export async function assertDiskSpace(): Promise<void> {
+  const stats = await fsp.statfs(config.paths.dataDir).catch(() => null);
+  if (!stats) return;
+
+  const freeMb = (stats.bavail * stats.bsize) / 1_048_576;
+  if (freeMb < config.ingest.minFreeDiskMb) {
+    throw new DiskFullError(
+      `only ${Math.round(freeMb)}MB free on the data volume, need ${config.ingest.minFreeDiskMb}MB`,
+    );
+  }
+}
+
 export type IngestOutcome =
   | { kind: 'accepted'; clipId: number }
   | { kind: 'duplicate'; clipId: number; ofClipId: number; reason: 'hash' | 'perceptual' }
@@ -30,6 +48,8 @@ export async function ingestCandidate(candidate: Candidate): Promise<IngestOutco
   let file: string | null = null;
 
   try {
+    await assertDiskSpace();
+
     file =
       candidate.sourceType === 'attachment'
         ? await downloadDirect(candidate.sourceUrl, destBase)
@@ -79,6 +99,13 @@ export async function ingestCandidate(candidate: Candidate): Promise<IngestOutco
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     if (file) await discard(file);
+
+    if (err instanceof DiskFullError) {
+      // Not the clip's fault — leave it pending so it is retried once space frees up.
+      log.error({ err: reason }, 'out of disk space, ingest paused');
+      throw err;
+    }
+
     clips.setStatus(clipId, 'rejected', reason);
     log.warn({ err: reason }, 'clip rejected');
     return { kind: 'rejected', clipId, reason };

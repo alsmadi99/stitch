@@ -4,7 +4,7 @@ import { logger } from './logger.js';
 import * as clipsRepo from './db/clips.js';
 import * as reelsRepo from './db/reels.js';
 import { compileReel } from './video/compile.js';
-import { buildDescription, buildTitle } from './youtube/metadata.js';
+import { buildDescription, buildTags, buildTitle } from './youtube/metadata.js';
 import { uploadReel } from './youtube/upload.js';
 import { announceFailure, announceReel } from './discord/notify.js';
 
@@ -50,9 +50,13 @@ export async function runPipeline(trigger: Trigger): Promise<RunResult> {
 
   try {
     log.info({ clips: batch.length }, 'pipeline start');
-    const compiled = await compileReel(reelId, batch);
 
-    const title = buildTitle(reelsRepo.publishedReelCount() + 1, batch.length);
+    // The episode number is burned into the thumbnail as well as the title, so it has
+    // to be settled before compiling rather than at upload time.
+    const sequence = reelsRepo.completedReelCount() + 1;
+    const compiled = await compileReel(reelId, batch, sequence);
+
+    const title = buildTitle(sequence, batch.length);
     reelsRepo.updateReel(reelId, {
       status: 'ready',
       video_path: compiled.videoPath,
@@ -68,17 +72,12 @@ export async function runPipeline(trigger: Trigger): Promise<RunResult> {
 
     reelsRepo.setReelStatus(reelId, 'uploading');
 
-    const description = buildDescription(
-      compiled.chapters,
-      compiled.duration,
-      clipsRepo.contributorsForReel(reelId),
-    );
-
     const upload = await uploadReel({
       videoPath: compiled.videoPath,
       thumbnailPath: compiled.thumbnailPath,
       title,
-      description,
+      description: buildDescription(sequence, title),
+      tags: buildTags(),
     });
 
     reelsRepo.updateReel(reelId, {

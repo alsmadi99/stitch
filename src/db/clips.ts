@@ -94,11 +94,3 @@ export function releaseClips(reelId: number): void {
   ).run(reelId);
 }
 
-export function contributorsForReel(reelId: number): { author_name: string; n: number }[] {
-  return db
-    .prepare(
-      `SELECT author_name, COUNT(*) AS n FROM clips WHERE reel_id = ?
-       GROUP BY author_id ORDER BY n DESC, author_name ASC`,
-    )
-    .all(reelId) as { author_name: string; n: number }[];
-}

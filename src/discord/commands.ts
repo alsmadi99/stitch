@@ -5,7 +5,6 @@ import {
   REST,
   Routes,
   SlashCommandBuilder,
-  type ButtonInteraction,
   type ChatInputCommandInteraction,
   type Client,
   type GuildMember,
@@ -17,8 +16,7 @@ import * as clipsRepo from '../db/clips.js';
 import * as reelsRepo from '../db/reels.js';
 import { isRunning, runPipeline } from '../pipeline.js';
 import { setPrivacy } from '../youtube/upload.js';
-import { backfill } from './collector.js';
-import { PUBLISH_BUTTON_ID } from './notify.js';
+import { describeDrain, drainHistory } from '../drain.js';
 
 const commands = [
   new SlashCommandBuilder()
@@ -28,9 +26,25 @@ const commands = [
     .addSubcommand((s) =>
       s
         .setName('backfill')
-        .setDescription('Scan channel history for clips posted before the bot joined')
+        .setDescription('Scan the whole channel history and build reels from every clip in it')
         .addIntegerOption((o) =>
-          o.setName('limit').setDescription('Messages to scan (default 500)').setMinValue(1).setMaxValue(5000),
+          o
+            .setName('limit')
+            .setDescription('Only scan this many messages (default: everything)')
+            .setMinValue(1)
+            .setMaxValue(100000),
+        )
+        .addIntegerOption((o) =>
+          o
+            .setName('reels')
+            .setDescription('Stop after this many reels (default: BACKFILL_MAX_REELS)')
+            .setMinValue(1)
+            .setMaxValue(20),
+        )
+        .addBooleanOption((o) =>
+          o
+            .setName('restart')
+            .setDescription('Start again from the first message instead of resuming'),
         ),
     ),
   new SlashCommandBuilder()
@@ -68,9 +82,6 @@ export function registerCommands(client: Client): void {
 }
 
 async function handleInteraction(interaction: Interaction): Promise<void> {
-  if (interaction.isButton() && interaction.customId.startsWith(PUBLISH_BUTTON_ID)) {
-    return handlePublishButton(interaction);
-  }
   if (!interaction.isChatInputCommand()) return;
 
   if (!isAuthorized(interaction)) {
@@ -101,12 +112,30 @@ async function handleClips(interaction: ChatInputCommandInteraction): Promise<vo
   }
 
   if (sub === 'backfill') {
-    const limit = interaction.options.getInteger('limit') ?? 500;
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const stats = await backfill(interaction.client, limit);
-    await interaction.editReply(
-      `Scanned ${stats.scanned} messages: ${stats.accepted} queued, ${stats.duplicate} duplicates, ${stats.rejected} rejected.`,
-    );
+    if (isRunning()) {
+      await interaction.reply({ content: 'A reel is compiling — try again once it finishes.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const limit = interaction.options.getInteger('limit') ?? undefined;
+    const maxReels = interaction.options.getInteger('reels') ?? undefined;
+    const restart = interaction.options.getBoolean('restart') ?? false;
+
+    await interaction.reply({
+      content: [
+        restart
+          ? 'Rescanning the channel from its first message.'
+          : 'Scanning the channel history from where the last run stopped.',
+        'Each batch of clips is uploaded as its own reel and the link is posted here.',
+        'This runs for as long as it needs — check progress with `/clips status`.',
+      ].join('\n'),
+      flags: MessageFlags.Ephemeral,
+    });
+
+    // Not awaited: a full history walk far outlives the 15 minute interaction token.
+    void drainHistory(interaction.client, { limit, restart, maxReels })
+      .then((result) => logger.info({ summary: describeDrain(result) }, 'backfill finished'))
+      .catch((err) => logger.error({ err: (err as Error).message }, 'backfill failed'));
   }
 }
 
@@ -136,28 +165,25 @@ async function handleReel(interaction: ChatInputCommandInteraction): Promise<voi
       return;
     }
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    await publishReel(reel.id, reel.youtube_id);
-    await interaction.editReply(`Reel #${reel.id} is public: ${reel.youtube_url}`);
+    try {
+      await publishReel(reel.id, reel.youtube_id);
+      await interaction.editReply(`Reel #${reel.id} is public: ${reel.youtube_url}`);
+    } catch (err) {
+      await interaction.editReply(publishErrorMessage(err));
+    }
   }
 }
 
-async function handlePublishButton(interaction: ButtonInteraction): Promise<void> {
-  if (!isAuthorized(interaction)) {
-    await interaction.reply({ content: 'You need Manage Server for that.', flags: MessageFlags.Ephemeral });
-    return;
+/**
+ * A Google Cloud project that has not passed API verification cannot flip a video to
+ * public — the API answers 403 no matter what the channel's own permissions are.
+ */
+function publishErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/forbidden|403/i.test(message)) {
+    return 'YouTube refused the change (403). Unverified API projects cannot make a video public — flip it in YouTube Studio instead.';
   }
-
-  const reelId = Number(interaction.customId.split(':').pop());
-  const reel = reelsRepo.getReel(reelId);
-  if (!reel?.youtube_id) {
-    await interaction.reply({ content: 'That reel has no YouTube video.', flags: MessageFlags.Ephemeral });
-    return;
-  }
-
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  await publishReel(reelId, reel.youtube_id);
-  await interaction.editReply(`Published: ${reel.youtube_url}`);
-  await interaction.message.edit({ components: [] }).catch(() => undefined);
+  return `Publish failed: ${message}`;
 }
 
 async function publishReel(reelId: number, videoId: string): Promise<void> {

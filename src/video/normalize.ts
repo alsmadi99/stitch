@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { probe } from '../ingest/probe.js';
 import type { ClipRow } from '../types.js';
-import { escapeFilterPath, ffmpeg, resolveFont } from './ffmpeg.js';
+import { encoderArgs, escapeFilterPath, ffmpeg, resolveFont, threadArgs } from './ffmpeg.js';
 
 export interface NormalizedClip {
   clipId: number;
@@ -20,7 +20,7 @@ export interface NormalizedClip {
  * match, and loudnorm is what stops one screaming clip from blowing out the mix.
  */
 export async function normalizeClip(clip: ClipRow, index: number): Promise<NormalizedClip> {
-  const { width, height, fps, maxClipSeconds, preset, crf } = config.video;
+  const { width, height, maxClipSeconds } = config.video;
   if (!clip.file_path) throw new Error(`clip ${clip.id} has no downloaded file`);
 
   const effective = Math.min(clip.duration ?? maxClipSeconds, maxClipSeconds);
@@ -29,7 +29,7 @@ export async function normalizeClip(clip: ClipRow, index: number): Promise<Norma
   const videoChain = [
     `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
     `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
-    `fps=${fps}`,
+    `fps=${config.video.fps}`,
     'setsar=1',
     'format=yuv420p',
   ];
@@ -43,7 +43,7 @@ export async function normalizeClip(clip: ClipRow, index: number): Promise<Norma
     'loudnorm=I=-16:TP=-1.5:LRA=11',
   ];
 
-  const args: string[] = ['-y', '-t', effective.toFixed(3), '-i', clip.file_path];
+  const args: string[] = ['-y', ...threadArgs(), '-t', effective.toFixed(3), '-i', clip.file_path];
 
   if (!clip.has_audio) {
     args.push('-f', 'lavfi', '-t', effective.toFixed(3), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
@@ -58,24 +58,7 @@ export async function normalizeClip(clip: ClipRow, index: number): Promise<Norma
     '[v]',
     '-map',
     '[a]',
-    '-c:v',
-    'libx264',
-    '-preset',
-    preset,
-    '-crf',
-    String(crf),
-    '-pix_fmt',
-    'yuv420p',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '192k',
-    '-ar',
-    '48000',
-    '-ac',
-    '2',
-    '-movflags',
-    '+faststart',
+    ...encoderArgs(),
     out,
   );
 

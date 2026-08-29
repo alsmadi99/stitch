@@ -21,10 +21,13 @@ export function setReelStatus(id: number, status: ReelStatus, error?: string): v
   db.prepare('UPDATE reels SET status = ?, error = ? WHERE id = ?').run(status, error ?? null, id);
 }
 
-/** Sequence number used in the video title — counts reels that reached YouTube. */
-export function publishedReelCount(): number {
+/**
+ * Episode number base. Counts every reel that got as far as a finished video, so the
+ * numbering keeps advancing in local-only mode and a failed run does not burn a number.
+ */
+export function completedReelCount(): number {
   const row = db
-    .prepare("SELECT COUNT(*) AS n FROM reels WHERE status IN ('uploaded', 'published')")
+    .prepare("SELECT COUNT(*) AS n FROM reels WHERE status IN ('ready', 'uploading', 'uploaded', 'published')")
     .get() as { n: number } | undefined;
   return row?.n ?? 0;
 }
