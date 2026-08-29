@@ -53,7 +53,15 @@ services:
 
     volumes:
       # SQLite database, downloaded clips, finished reels. Back this up.
-      - ./data:/app/data
+      #
+      # A named volume rather than a bind mount: Docker seeds a named volume from the
+      # image, ownership included, so the unprivileged app user can write to it with no
+      # setup. A host bind mount (`./data:/app/data`) arrives owned by root and would
+      # fail with EACCES — the entrypoint fixes that case too, but the volume needs no
+      # fixing in the first place.
+      #
+      # To use a host directory instead, swap the line below for `- ./data:/app/data`.
+      - clipreel-data:/app/data
 
     deploy:
       resources:
@@ -78,3 +86,6 @@ services:
       options:
         max-size: '10m'
         max-file: '3'
+
+volumes:
+  clipreel-data:

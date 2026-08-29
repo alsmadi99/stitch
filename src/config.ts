@@ -220,7 +220,23 @@ export const config = {
 // Every subsystem assumes these exist; create them once, here, rather than in whichever
 // module happens to run first.
 for (const dir of [config.paths.dataDir, config.paths.rawDir, config.paths.workDir, config.paths.outDir]) {
-  fs.mkdirSync(dir, { recursive: true });
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EACCES' || code === 'EPERM') {
+      throw new Error(
+        `Cannot write to ${dir} (${code}).
+
+` +
+          'In Docker this means the mounted data directory is owned by another user. ' +
+          `Fix it on the host with: chown -R 1000:1000 <host data dir>
+` +
+          'A named volume avoids this entirely — see docker-compose.yml.',
+      );
+    }
+    throw err;
+  }
 }
 
 export type Config = typeof config;

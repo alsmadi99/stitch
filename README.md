@@ -236,6 +236,9 @@ Two things the bot does control, both of which quietly kill monetization if wron
   `privacyStatus: "public"` and locks the video as private anyway, and `/reel publish`
   comes back 403 Forbidden. Until the project passes API verification, publishing is a
   YouTube Studio action. The default `YOUTUBE_PRIVACY=private` matches this reality.
+- **Docker Compose parses `.env` more strictly than dotenv.** A stray line that is not
+  `KEY=value`, a comment, or blank makes `docker compose` refuse the whole file with
+  `key cannot contain a space`. Keep escape sequences out of comments.
 - **`#` in a .env value starts a comment.** dotenv drops everything after an unquoted
   `#`, so `YOUTUBE_TITLE_TEMPLATE=... #{n} ...` silently loses the episode number and
   `THUMBNAIL_ACCENT=#E62117` becomes empty. Wrap values containing `#` in double
@@ -356,9 +359,34 @@ The image is Debian-based rather than Alpine on purpose — `better-sqlite3` and
 source. It also installs `fonts-dejavu-core` (drawtext needs a real TTF for the
 thumbnail) and the `yt-dlp` binary.
 
-`./data` is a bind mount holding the SQLite database, downloaded clips, and finished
-reels. **That directory is the only state — back it up.** Losing it means losing the
-dedupe history and the episode numbering.
+State lives in the named volume `clipreel-data`: the SQLite database, downloaded clips,
+and finished reels. **That volume is the only state — back it up.** Losing it means
+losing the dedupe history and the episode numbering.
+
+```bash
+docker run --rm -v clipreel_clipreel-data:/data -v "$PWD:/backup" alpine tar czf /backup/clipreel-data.tar.gz -C /data .
+```
+
+A named volume rather than a host bind mount, because of file ownership. The container
+runs unprivileged as uid 1000, but a bind-mounted host directory arrives owned by root
+— the mount replaces whatever the image set — and the app dies at startup:
+
+```
+Error: EACCES: permission denied, mkdir '/app/data/raw'
+```
+
+Docker seeds a *named* volume from the image instead, ownership included, so there is
+nothing to fix. If you would rather use a host directory, swap the volume line for
+`- ./data:/app/data`; the entrypoint starts as root only long enough to take ownership
+of the data directory, then drops to uid 1000 before running the bot, so that works
+too. Set `APP_UID`/`APP_GID` if the host directory belongs to someone other than 1000.
+
+If you already have data in a host `./data` from an earlier deploy and want to move to
+the named volume, copy it across before switching:
+
+```bash
+docker run --rm -v "$PWD/data:/from" -v clipreel_clipreel-data:/to alpine cp -a /from/. /to/
+```
 
 A healthcheck watches a heartbeat file that is only refreshed while the Discord
 gateway is connected, so a wedged websocket is restarted instead of sitting there

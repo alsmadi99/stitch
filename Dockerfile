@@ -34,7 +34,7 @@ ENV NODE_ENV=production
 # yt-dlp is optional but small; without it link clips are skipped.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-       ca-certificates ffmpeg fonts-dejavu-core curl \
+       ca-certificates ffmpeg fonts-dejavu-core gosu curl \
   && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o /usr/local/bin/yt-dlp \
   && chmod +x /usr/local/bin/yt-dlp \
   && apt-get purge -y curl && apt-get autoremove -y \
@@ -52,14 +52,26 @@ COPY --chown=node:node package.json ./
 COPY --chown=node:node src/db/schema.sql ./src/db/schema.sql
 
 # The data volume holds the SQLite database, downloaded clips, and finished reels.
+# A bind mount replaces this directory at runtime, so the entrypoint re-applies
+# ownership; this chown only matters for named volumes, which inherit it from here.
 RUN mkdir -p /app/data && chown node:node /app/data
 VOLUME ["/app/data"]
 
-USER node
+# The entrypoint runs as root only long enough to fix the data directory's ownership,
+# then execs the app as this uid. Override if the host directory belongs to someone
+# other than 1000.
+ENV APP_UID=1000 \
+    APP_GID=1000
+
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+EXPOSE 3000
 
 # The bot writes a heartbeat while the gateway is connected; a wedged connection stops
-# updating it even though the process is still alive.
+# updating it even though the process is still alive. Run as the app user so it reads
+# the same paths the app writes.
 HEALTHCHECK --interval=60s --timeout=10s --start-period=90s --retries=3 \
-  CMD ["node", "dist/scripts/healthcheck.js"]
+  CMD ["gosu", "1000:1000", "node", "dist/scripts/healthcheck.js"]
 
 CMD ["node", "--enable-source-maps", "dist/src/index.js"]
