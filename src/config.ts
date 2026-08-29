@@ -1,0 +1,158 @@
+import 'dotenv/config';
+import fs from 'node:fs';
+import path from 'node:path';
+import { z } from 'zod';
+
+const bool = (def: boolean) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? def : /^(1|true|yes|on)$/i.test(v)));
+
+const num = (def: number) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? def : Number(v)))
+    .pipe(z.number().finite());
+
+const str = (def = '') =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined ? def : v.trim()));
+
+const csv = (def: string[] = []) =>
+  z
+    .string()
+    .optional()
+    .transform((v) =>
+      v === undefined || v.trim() === ''
+        ? def
+        : v
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean),
+    );
+
+const schema = z.object({
+  DISCORD_TOKEN: z.string().min(1, 'DISCORD_TOKEN is required'),
+  DISCORD_APP_ID: z.string().min(1, 'DISCORD_APP_ID is required'),
+  DISCORD_GUILD_ID: str(),
+  CLIPS_CHANNEL_ID: z.string().min(1, 'CLIPS_CHANNEL_ID is required'),
+  ANNOUNCE_CHANNEL_ID: str(),
+  ADMIN_ROLE_IDS: csv(),
+
+  REEL_MAX_CLIPS: num(20),
+  REEL_MIN_CLIPS: num(5),
+  REEL_CRON: str('0 18 * * 0'),
+
+  OUTPUT_WIDTH: num(1920),
+  OUTPUT_HEIGHT: num(1080),
+  OUTPUT_FPS: num(30),
+  TRANSITION_DURATION: num(0.5),
+  TRANSITIONS: csv(['fade', 'wipeleft', 'slideup', 'circleopen', 'dissolve']),
+  MAX_CLIP_SECONDS: num(60),
+  MIN_CLIP_SECONDS: num(2),
+  TITLE_CARDS: bool(true),
+  TITLE_CARD_SECONDS: num(3),
+  FONT_FILE: str(),
+  X264_PRESET: str('veryfast'),
+  X264_CRF: num(20),
+
+  MAX_DOWNLOAD_BYTES: num(524_288_000),
+  ALLOW_LINKS: bool(true),
+  PHASH_THRESHOLD: num(8),
+
+  YOUTUBE_CLIENT_ID: str(),
+  YOUTUBE_CLIENT_SECRET: str(),
+  YOUTUBE_REFRESH_TOKEN: str(),
+  YOUTUBE_PRIVACY: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === '' ? 'private' : v.trim()))
+    .pipe(z.enum(['private', 'unlisted', 'public'])),
+  YOUTUBE_AUTO_PUBLISH: bool(false),
+  YOUTUBE_TITLE_TEMPLATE: str('Best Gaming Clips #{n} — {month} {year}'),
+  YOUTUBE_TAGS: csv(['gaming', 'clips', 'montage']),
+  YOUTUBE_CATEGORY_ID: str('20'),
+
+  LOG_LEVEL: str('info'),
+  DATA_DIR: str('./data'),
+  CLEANUP_SOURCES: bool(false),
+});
+
+const parsed = schema.safeParse(process.env);
+
+if (!parsed.success) {
+  const issues = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
+  throw new Error(
+    `Invalid environment configuration:\n${issues}\n\nSet these in .env — .env.example documents each one.`,
+  );
+}
+
+const env = parsed.data;
+const dataDir = path.resolve(process.cwd(), env.DATA_DIR);
+
+export const config = {
+  discord: {
+    token: env.DISCORD_TOKEN,
+    appId: env.DISCORD_APP_ID,
+    guildId: env.DISCORD_GUILD_ID || undefined,
+    clipsChannelId: env.CLIPS_CHANNEL_ID,
+    announceChannelId: env.ANNOUNCE_CHANNEL_ID || env.CLIPS_CHANNEL_ID,
+    adminRoleIds: env.ADMIN_ROLE_IDS,
+  },
+  trigger: {
+    maxClips: env.REEL_MAX_CLIPS,
+    minClips: env.REEL_MIN_CLIPS,
+    cron: env.REEL_CRON,
+  },
+  video: {
+    width: env.OUTPUT_WIDTH,
+    height: env.OUTPUT_HEIGHT,
+    fps: env.OUTPUT_FPS,
+    transitionDuration: env.TRANSITION_DURATION,
+    transitions: env.TRANSITIONS,
+    maxClipSeconds: env.MAX_CLIP_SECONDS,
+    minClipSeconds: env.MIN_CLIP_SECONDS,
+    titleCards: env.TITLE_CARDS,
+    titleCardSeconds: env.TITLE_CARD_SECONDS,
+    fontFile: env.FONT_FILE || undefined,
+    preset: env.X264_PRESET,
+    crf: env.X264_CRF,
+  },
+  ingest: {
+    maxDownloadBytes: env.MAX_DOWNLOAD_BYTES,
+    allowLinks: env.ALLOW_LINKS,
+    phashThreshold: env.PHASH_THRESHOLD,
+  },
+  youtube: {
+    clientId: env.YOUTUBE_CLIENT_ID,
+    clientSecret: env.YOUTUBE_CLIENT_SECRET,
+    refreshToken: env.YOUTUBE_REFRESH_TOKEN,
+    privacy: env.YOUTUBE_PRIVACY,
+    autoPublish: env.YOUTUBE_AUTO_PUBLISH,
+    titleTemplate: env.YOUTUBE_TITLE_TEMPLATE,
+    tags: env.YOUTUBE_TAGS,
+    categoryId: env.YOUTUBE_CATEGORY_ID,
+    enabled: Boolean(env.YOUTUBE_CLIENT_ID && env.YOUTUBE_CLIENT_SECRET && env.YOUTUBE_REFRESH_TOKEN),
+  },
+  paths: {
+    dataDir,
+    rawDir: path.join(dataDir, 'raw'),
+    workDir: path.join(dataDir, 'work'),
+    outDir: path.join(dataDir, 'out'),
+    dbFile: path.join(dataDir, 'clipreel.db'),
+  },
+  logLevel: env.LOG_LEVEL,
+  cleanupSources: env.CLEANUP_SOURCES,
+} as const;
+
+// Every subsystem assumes these exist; create them once, here, rather than in whichever
+// module happens to run first.
+for (const dir of [config.paths.dataDir, config.paths.rawDir, config.paths.workDir, config.paths.outDir]) {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+export type Config = typeof config;

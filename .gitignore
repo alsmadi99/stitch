@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.log
+
+# runtime state
+data/raw/
+data/work/
+data/out/
+data/*.db
+data/*.db-shm
+data/*.db-wal
