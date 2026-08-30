@@ -30,8 +30,10 @@ export const FFPROBE =
   'ffprobe';
 
 /**
- * Caps ffmpeg's own threading. Left at 0 (auto) it spawns one worker per core and will
- * happily saturate a small VPS while the bot still needs to answer the gateway.
+ * Thread caps for the *input* side: decoding and filtering.
+ *
+ * `-threads` is positional. Placed before `-i` it configures the decoder only, which is
+ * why the encoder needs its own copy in `encoderArgs` — see the note there.
  */
 export function threadArgs(): string[] {
   const { threads } = config.video;
@@ -46,7 +48,15 @@ export function threadArgs(): string[] {
  * four times is visible. Only the last pass uses the configured CRF.
  */
 export function encoderArgs(crf = config.video.crf, preset = config.video.preset): string[] {
+  const { threads } = config.video;
+
   return [
+    // Repeated on the output side deliberately. `-threads` is positional: the copy
+    // before `-i` binds the decoder, and without one here x264 sizes its own pool from
+    // the host's core count. A cgroup CPU quota does not change what the process reads
+    // from the machine, so a 2-CPU container on a 12-core host still spun up 12 encoder
+    // threads, each holding frame buffers at full resolution.
+    ...(threads > 0 ? ['-threads', String(threads)] : []),
     '-c:v',
     'libx264',
     '-preset',
@@ -259,11 +269,14 @@ export function containerMemoryLimitMb(): number | null {
  * Fitted to measurements at 1080p — 1030MB at batch 3, 1200MB at 4, 1450MB at 5 — which
  * gives roughly 380MB fixed plus 215MB per input held open, scaled by pixel count.
  *
- * Those measurements used synthetic test patterns. Real gameplay is high-motion H.264
- * with B-frames and far larger reference buffers, so the estimate carries a margin;
- * without it the prediction reads comfortable right up until the kernel disagrees.
+ * Those measurements used synthetic test patterns, and the margin below is what stands
+ * between the model and real footage. It started at 1.25 and was raised after a real
+ * deployment: the model predicted 1531MB for 1080p at batch 3, and the kernel recorded
+ * a peak of 3072MB before killing ffmpeg. High-motion gameplay retains far more
+ * reference data than a test pattern, so an optimistic estimate here is worse than
+ * useless — it reads "comfortable" right up until the OOM.
  */
-const REAL_FOOTAGE_MARGIN = 1.25;
+const REAL_FOOTAGE_MARGIN = 2;
 
 export function estimatedStitchPeakMb(): number {
   const pixelRatio = (config.video.width * config.video.height) / (1920 * 1080);
