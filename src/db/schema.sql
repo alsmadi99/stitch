@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS reels (
   title          TEXT,
   description    TEXT,
   upload_attempts INTEGER NOT NULL DEFAULT 0,
+  playlist_item_id TEXT,
   next_attempt_at TEXT,
   error          TEXT,
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),

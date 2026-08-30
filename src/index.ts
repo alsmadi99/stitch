@@ -4,6 +4,7 @@ import { client, login } from './discord/client.js';
 import { registerCollector } from './discord/collector.js';
 import { deployCommands, registerCommands } from './discord/commands.js';
 import { registerReactions } from './discord/reactions.js';
+import { syncPlaylist } from './youtube/playlist.js';
 import { hasYtDlp } from './ingest/download.js';
 import { beat } from './heartbeat.js';
 import { startHttpServer } from './http.js';
@@ -72,6 +73,11 @@ async function main(): Promise<void> {
   // A reel deferred by a quota failure yesterday should go out without being asked.
   void retryPendingUploads().catch((err) =>
     logger.error({ err: (err as Error).message }, 'startup upload retry failed'),
+  );
+
+  // Turning the playlist on later backfills everything already uploaded.
+  void syncPlaylist().catch((err) =>
+    logger.warn({ err: (err as Error).message }, 'startup playlist sync failed'),
   );
 
   logger.info('ready');

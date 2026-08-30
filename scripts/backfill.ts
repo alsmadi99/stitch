@@ -15,6 +15,9 @@
  *                                    first, then walk the channel from scratch
  *   npm run backfill -- --force      skip the confirmation delay on --restart
  */
+import { config } from '../src/config.js';
+import { countPending } from '../src/db/clips.js';
+import { pendingUploadCount } from '../src/db/reels.js';
 import { HEARTBEAT_MAX_AGE_MS, heartbeatAgeMs } from '../src/heartbeat.js';
 import { readJobState, requestBackfill, requestCancel, type JobState } from '../src/jobs.js';
 import { describeState } from '../src/reset.js';
@@ -40,12 +43,43 @@ function render(state: JobState): string {
 
 if (flag('status')) {
   const state = readJobState();
+
   if (!state) {
-    console.log('No backfill has been run yet.');
-  } else {
-    console.log(render(state));
-    if (state.detail) console.log(`\n${state.detail}`);
+    console.log('No backfill has been run yet. Start one with: npm run backfill');
+    process.exit(0);
   }
+
+  console.log(render(state));
+  if (state.stoppedBy) console.log(`stopped by  : ${state.stoppedBy}`);
+  if (state.detail) console.log(`\n${state.detail}`);
+
+  // The two numbers that decide whether it picks itself back up.
+  const waiting = pendingUploadCount();
+  const room = config.ingest.maxPendingUploads;
+  console.log(`\nclips queued          : ${countPending()}`);
+  console.log(`reels awaiting upload : ${waiting} of ${room} allowed`);
+
+  const CONTINUABLE = ['quota', 'deferred', 'pendingCap', 'maxReels'];
+  const resumable = state.status === 'done' && CONTINUABLE.includes(state.stoppedBy ?? '');
+
+  if (state.status === 'running' || state.status === 'queued') {
+    console.log('\nStill working. Nothing to do.');
+  } else if (!config.ingest.backfillAutoContinue) {
+    console.log('\nBACKFILL_AUTO_CONTINUE is off — re-run `npm run backfill` to continue.');
+  } else if (resumable && waiting >= room) {
+    console.log(
+      '\nWaiting on the daily upload quota. Those reels are already built; the bot retries\n' +
+        'hourly and resumes the scan by itself once they go out. Nothing to do.',
+    );
+  } else if (resumable) {
+    console.log('\nThere is room to upload again — the hourly sweep should resume it within the hour.');
+    console.log('Re-run `npm run backfill` to start now instead of waiting.');
+  } else if (state.status === 'done') {
+    console.log('\nReached the end of the channel. Re-run only if new clips have been posted since.');
+  } else {
+    console.log('\nRe-run `npm run backfill` to continue from the cursor.');
+  }
+
   process.exit(0);
 }
 

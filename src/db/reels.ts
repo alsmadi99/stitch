@@ -58,6 +58,17 @@ export function unfinishedReels(): ReelRow[] {
     .all() as ReelRow[];
 }
 
+/** Uploaded reels that are not yet in the series playlist. */
+export function missingFromPlaylist(): ReelRow[] {
+  return db
+    .prepare(
+      `SELECT * FROM reels
+       WHERE youtube_id IS NOT NULL AND playlist_item_id IS NULL
+       ORDER BY id`,
+    )
+    .all() as ReelRow[];
+}
+
 export function latestReel(): ReelRow | undefined {
   return db.prepare('SELECT * FROM reels ORDER BY id DESC LIMIT 1').get() as ReelRow | undefined;
 }

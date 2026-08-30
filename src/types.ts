@@ -51,6 +51,8 @@ export interface ReelRow {
   title: string | null;
   description: string | null;
   upload_attempts: number;
+  /** Set once the video has been added to the series playlist. */
+  playlist_item_id: string | null;
   next_attempt_at: string | null;
   error: string | null;
   created_at: string;

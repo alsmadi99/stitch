@@ -136,6 +136,13 @@ const schema = z.object({
     'arabic gaming',
   ]),
   YOUTUBE_CATEGORY_ID: str('20'),
+  YOUTUBE_PLAYLIST_ID: str(),
+  YOUTUBE_PLAYLIST_TITLE: str(),
+  YOUTUBE_PLAYLIST_PRIVACY: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === '' ? 'public' : v.trim()))
+    .pipe(z.enum(['private', 'unlisted', 'public'])),
 
   HTTP_PORT: num(3000),
   LOG_LEVEL: str('info'),
@@ -216,6 +223,9 @@ export const config = {
     description: env.YOUTUBE_DESCRIPTION,
     tags: env.YOUTUBE_TAGS,
     categoryId: env.YOUTUBE_CATEGORY_ID,
+    playlistId: env.YOUTUBE_PLAYLIST_ID,
+    playlistTitle: env.YOUTUBE_PLAYLIST_TITLE,
+    playlistPrivacy: env.YOUTUBE_PLAYLIST_PRIVACY,
     enabled: Boolean(env.YOUTUBE_CLIENT_ID && env.YOUTUBE_CLIENT_SECRET && env.YOUTUBE_REFRESH_TOKEN),
   },
   paths: {

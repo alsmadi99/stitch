@@ -205,6 +205,26 @@ if (!config.youtube.enabled) {
         'ok',
         `uploading to "${channel.snippet?.title}"${who ? ` (${who})` : ''} as ${(await import('../src/youtube/upload.js')).uploadPrivacy()}`,
       );
+      // Resolving the playlist up front turns "the videos are not in my playlist" into
+      // something visible before a run rather than after one.
+      if (config.youtube.playlistId || config.youtube.playlistTitle) {
+        try {
+          const { resolvePlaylistId } = await import('../src/youtube/playlist.js');
+          const { missingFromPlaylist } = await import('../src/db/reels.js');
+          const id = await resolvePlaylistId();
+          const missing = missingFromPlaylist().length;
+          add(
+            'youtube playlist',
+            'ok',
+            `${id ?? 'none'}${missing > 0 ? ` — ${missing} uploaded reel(s) not added yet, the hourly sweep will` : ' — up to date'}`,
+          );
+        } catch (err) {
+          add('youtube playlist', 'fail', errorMessage(err));
+        }
+      } else {
+        add('youtube playlist', 'ok', 'disabled (set YOUTUBE_PLAYLIST_TITLE to enable)');
+      }
+
       // A channel flagged as made-for-kids has personalised ads disabled on every
       // upload, which is the usual reason monetization silently never turns on.
       if (channel.status?.madeForKids) {

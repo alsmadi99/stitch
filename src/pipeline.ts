@@ -8,6 +8,7 @@ import * as reelsRepo from './db/reels.js';
 import { compileReel } from './video/compile.js';
 import { buildDescription, buildTags, buildTitle } from './youtube/metadata.js';
 import { isQuotaError, isRetryableUploadError, uploadReel, type UploadResult } from './youtube/upload.js';
+import { addReelToPlaylist, syncPlaylist } from './youtube/playlist.js';
 import { announceFailure, announceReel } from './discord/notify.js';
 import { client } from './discord/client.js';
 import { filterVetoed } from './discord/reactions.js';
@@ -337,6 +338,10 @@ async function attemptUpload(reelId: number): Promise<UploadResult | null> {
       error: null,
     });
 
+    // Deliberately after the upload is recorded and never allowed to throw: a video that
+    // is live but missing from the playlist is cosmetic, and the hourly sweep retries it.
+    await addReelToPlaylist(reelId, upload.videoId);
+
     await announceReel(reelId, {
       title: reel.title ?? `Reel #${reelId}`,
       duration: 0,
@@ -429,6 +434,11 @@ export async function retryPendingUploads(): Promise<number> {
     running = false;
     releaseLock();
   }
+
+  // Also catches reels uploaded before the playlist was configured at all.
+  await syncPlaylist().catch((err) =>
+    logger.warn({ err: (err as Error).message }, 'playlist sync failed'),
+  );
 
   return uploaded;
 }

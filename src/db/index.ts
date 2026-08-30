@@ -36,6 +36,7 @@ function ensureColumn(table: string, column: string, definition: string): void {
 ensureColumn('reels', 'description', 'TEXT');
 ensureColumn('reels', 'upload_attempts', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('reels', 'next_attempt_at', 'TEXT');
+ensureColumn('reels', 'playlist_item_id', 'TEXT');
 
 logger.debug({ file: config.paths.dbFile }, 'sqlite ready');
 
