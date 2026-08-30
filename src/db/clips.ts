@@ -62,6 +62,18 @@ export function takePending(limit: number): ClipRow[] {
     .all(limit) as ClipRow[];
 }
 
+/**
+ * The clips that went into one reel, in the order the reel used.
+ *
+ * Ordered the same way `takePending` selects them, so a rebuild lays the clips out in
+ * the sequence the original upload had rather than a new one.
+ */
+export function clipsForReel(reelId: number): ClipRow[] {
+  return db
+    .prepare(`SELECT * FROM clips WHERE reel_id = ? ORDER BY message_at ASC, id ASC`)
+    .all(reelId) as ClipRow[];
+}
+
 /** Every clip extracted from one message — a post can carry several. */
 export function findByMessageId(messageId: string): ClipRow[] {
   return db

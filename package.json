@@ -22,7 +22,8 @@
     "backfill": "tsx scripts/backfill.ts",
     "backfill:status": "tsx scripts/backfill.ts --status",
     "backfill:stop": "tsx scripts/backfill.ts --stop",
-    "reel:now": "tsx scripts/run-now.ts"
+    "reel:now": "tsx scripts/run-now.ts",
+    "rebuild": "tsx scripts/rebuild.ts"
   },
   "dependencies": {
     "@googleapis/youtube": "^34.1.0",

@@ -9,6 +9,13 @@ export interface UploadInput {
   title: string;
   description: string;
   tags: string[];
+  /**
+   * Overrides the configured privacy for this one upload.
+   *
+   * A rebuild wants to go up private for review even on a channel that publishes
+   * automatically, so the decision has to be per-upload rather than per-config.
+   */
+  privacy?: 'private' | 'unlisted' | 'public';
 }
 
 export interface UploadResult {
@@ -40,9 +47,10 @@ export function uploadPrivacy(): 'private' | 'unlisted' | 'public' {
 export async function uploadReel(input: UploadInput): Promise<UploadResult> {
   const youtube = youtubeClient();
   const size = fs.statSync(input.videoPath).size;
+  const privacy = input.privacy ?? uploadPrivacy();
 
   logger.info(
-    { title: input.title, sizeMb: Math.round(size / 1_048_576), privacy: uploadPrivacy() },
+    { title: input.title, sizeMb: Math.round(size / 1_048_576), privacy },
     'uploading to youtube',
   );
 
@@ -58,7 +66,7 @@ export async function uploadReel(input: UploadInput): Promise<UploadResult> {
           categoryId: config.youtube.categoryId,
         },
         status: {
-          privacyStatus: uploadPrivacy(),
+          privacyStatus: privacy,
           selfDeclaredMadeForKids: false,
         },
       },
@@ -92,7 +100,7 @@ export async function uploadReel(input: UploadInput): Promise<UploadResult> {
   return {
     videoId,
     url: `https://youtu.be/${videoId}`,
-    privacy: res.data.status?.privacyStatus ?? uploadPrivacy(),
+    privacy: res.data.status?.privacyStatus ?? privacy,
   };
 }
 

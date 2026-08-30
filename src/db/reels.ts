@@ -69,6 +69,21 @@ export function missingFromPlaylist(): ReelRow[] {
     .all() as ReelRow[];
 }
 
+/**
+ * Reels whose title carries this episode number.
+ *
+ * The episode is what the video is called on YouTube; the row id is an internal counter
+ * that a failed reel still consumes. Matched on a `#N` not followed by another digit, so
+ * asking for #8 does not also return #80.
+ */
+export function findByEpisode(episode: number): ReelRow[] {
+  const rows = db
+    .prepare(`SELECT * FROM reels WHERE title LIKE ? ORDER BY id DESC`)
+    .all(`%#${episode}%`) as ReelRow[];
+  const exact = new RegExp(`#${episode}(?![0-9])`);
+  return rows.filter((r) => exact.test(r.title ?? ''));
+}
+
 export function latestReel(): ReelRow | undefined {
   return db.prepare('SELECT * FROM reels ORDER BY id DESC LIMIT 1').get() as ReelRow | undefined;
 }
