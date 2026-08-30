@@ -9,8 +9,12 @@
 # the memory dial. A single call with all 20 clips would need roughly 4.5 GB and get
 # OOM-killed on an 8 GB box — hence the batching.
 #
-# The defaults below are 1080p with STITCH_BATCH=3, peaking near 1.2 GB including Node.
-# For half the memory, uncomment the 720p block.
+# The defaults below are 1080p with STITCH_BATCH=3. Measured on synthetic footage that
+# peaks near 1.2 GB including Node, but real gameplay carries much larger reference
+# buffers — a 1536 MB limit was enough for the test clips and got ffmpeg OOM-killed on
+# real ones, which surfaces as "killed by SIGKILL" with no error output. Hence 2 GB.
+#
+# For half the memory and roughly twice the speed, uncomment the 720p block.
 
 services:
   stitch:
@@ -67,13 +71,13 @@ services:
       resources:
         limits:
           # Above the measured 1080p/batch-3 peak with headroom for Node and the OS.
-          memory: 1536M
+          memory: 2048M
           cpus: '2.0'
         reservations:
           memory: 256M
 
     # Compose v2 standalone ignores deploy.resources; these are the equivalent.
-    mem_limit: 1536m
+    mem_limit: 2048m
     mem_reservation: 256m
     cpus: 2.0
 

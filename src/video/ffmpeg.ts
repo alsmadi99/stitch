@@ -75,6 +75,9 @@ export class FfmpegError extends Error {
     message: string,
     readonly code: number | null,
     readonly stderr: string,
+    /** Set when the process was killed rather than exiting on its own. */
+    readonly signal: NodeJS.Signals | null = null,
+    readonly timedOut = false,
   ) {
     super(message);
     this.name = 'FfmpegError';
@@ -95,6 +98,7 @@ interface RunResult {
 function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     logger.debug({ bin, args }, 'spawn');
+    const startedAt = Date.now();
     const child = spawn(bin, args, { windowsHide: true });
 
     const out: Buffer[] = [];
@@ -110,8 +114,12 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
       if (err.length > 64_000) err = err.slice(-32_000);
     });
 
+    let timedOut = false;
     if (opts.timeoutMs) {
-      timer = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs);
+      timer = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, opts.timeoutMs);
     }
 
     child.on('error', (e) => {
@@ -119,14 +127,35 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
       reject(e);
     });
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (timer) clearTimeout(timer);
+
       if (code === 0) {
         resolve({ stdout: Buffer.concat(out), stderr: err });
-      } else {
-        const lastLine = err.trim().split('\n').slice(-1)[0] ?? '';
-        reject(new FfmpegError(`${bin} exited ${code}: ${lastLine}`, code, err));
+        return;
       }
+
+      const lastLine = err.trim().split('\n').slice(-1)[0] ?? '';
+      const elapsed = Math.round((Date.now() - startedAt) / 1000);
+
+      // A null exit code means the process was killed rather than having failed, and a
+      // killed ffmpeg never gets to write to stderr. Reporting only "exited null"
+      // discards the one detail that identifies the killer, so name it explicitly.
+      let message: string;
+      if (timedOut) {
+        const limit = Math.round((opts.timeoutMs ?? 0) / 1000);
+        message = `${bin} was killed after exceeding its ${limit}s timeout (ran ${elapsed}s)`;
+      } else if (signal) {
+        message =
+          `${bin} was killed by ${signal} after ${elapsed}s with no error output. ` +
+          'That is almost always the kernel OOM killer reclaiming memory after the ' +
+          'container hit its limit — lower STITCH_BATCH, drop OUTPUT_HEIGHT to 720, ' +
+          'or raise the memory limit.';
+      } else {
+        message = `${bin} exited ${code}: ${lastLine}`;
+      }
+
+      reject(new FfmpegError(message, code, err, signal, timedOut));
     });
   });
 }
@@ -145,6 +174,45 @@ export function ffprobe(args: string[]): Promise<RunResult> {
  */
 export function escapeFilterPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/:/g, '\\:');
+}
+
+/**
+ * The container's memory ceiling, or null when unlimited / not in a cgroup.
+ * cgroup v2 first, then v1.
+ */
+export function containerMemoryLimitMb(): number | null {
+  for (const file of ['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory/memory.limit_in_bytes']) {
+    try {
+      const raw = fs.readFileSync(file, 'utf8').trim();
+      if (raw === 'max') return null;
+      const bytes = Number(raw);
+      // An unset v1 limit shows up as a number near 2^63, not as "max".
+      if (!Number.isFinite(bytes) || bytes <= 0 || bytes > 2 ** 52) return null;
+      return Math.round(bytes / 1_048_576);
+    } catch {
+      // Not in a container, or the file is unreadable. Try the next one.
+    }
+  }
+  return null;
+}
+
+/**
+ * Rough peak RSS for one stitch call, used to warn before a run rather than discovering
+ * the ceiling through an OOM kill.
+ *
+ * Fitted to measurements at 1080p — 1030MB at batch 3, 1200MB at 4, 1450MB at 5 — which
+ * gives roughly 380MB fixed plus 215MB per input held open, scaled by pixel count.
+ *
+ * Those measurements used synthetic test patterns. Real gameplay is high-motion H.264
+ * with B-frames and far larger reference buffers, so the estimate carries a margin;
+ * without it the prediction reads comfortable right up until the kernel disagrees.
+ */
+const REAL_FOOTAGE_MARGIN = 1.25;
+
+export function estimatedStitchPeakMb(): number {
+  const pixelRatio = (config.video.width * config.video.height) / (1920 * 1080);
+  const base = 380 + 215 * config.video.stitchBatch;
+  return Math.round(base * pixelRatio * REAL_FOOTAGE_MARGIN);
 }
 
 let filterCache: Set<string> | null = null;

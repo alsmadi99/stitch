@@ -54,10 +54,32 @@ try {
 // ---------------------------------------------------------------- binaries
 
 try {
-  const { ffmpeg, ffprobe, FFMPEG } = await import('../src/video/ffmpeg.js');
+  const { ffmpeg, ffprobe, FFMPEG, containerMemoryLimitMb, estimatedStitchPeakMb } = await import(
+    '../src/video/ffmpeg.js'
+  );
   await ffmpeg(['-version']);
   await ffprobe(['-version']);
   add('ffmpeg / ffprobe', 'ok', FFMPEG.includes('ffmpeg-static') ? 'bundled binaries' : FFMPEG);
+
+  // An OOM kill shows up as "killed by SIGKILL" with no error output, which is a
+  // miserable thing to debug after a 40 minute compile. Check the headroom up front.
+  const limit = containerMemoryLimitMb();
+  const peak = estimatedStitchPeakMb();
+  const nodeOverhead = 250;
+  const detail =
+    `${config.video.width}x${config.video.height}, STITCH_BATCH=${config.video.stitchBatch} ` +
+    `-> ~${peak}MB for ffmpeg + ~${nodeOverhead}MB for the bot` +
+    (limit ? `, container limit ${limit}MB` : ', no container limit');
+
+  if (!limit) {
+    add('memory headroom', 'ok', detail);
+  } else if (peak + nodeOverhead > limit) {
+    add('memory headroom', 'fail', `${detail} — over the limit, ffmpeg will be OOM killed`);
+  } else if (peak + nodeOverhead > limit * 0.85) {
+    add('memory headroom', 'warn', `${detail} — under 15% headroom, real footage may not fit`);
+  } else {
+    add('memory headroom', 'ok', detail);
+  }
 } catch (err) {
   add('ffmpeg / ffprobe', 'fail', errorMessage(err));
 }
