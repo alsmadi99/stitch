@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { probe } from '../ingest/probe.js';
 import type { ClipRow } from '../types.js';
-import { encoderArgs, ffmpeg, threadArgs } from './ffmpeg.js';
+import { encoderArgs, ffmpeg, ffprobe, threadArgs } from './ffmpeg.js';
 import { normalizeClip, type NormalizedClip } from './normalize.js';
 import { generateThumbnail } from './thumbnail.js';
 
@@ -143,6 +143,37 @@ export async function compileReel(
   return { videoPath, thumbnailPath, duration, clipIds: normalized.map((c) => c.clipId) };
 }
 
+/**
+ * Duration, frame count and size of a stitch input, for the log line above.
+ *
+ * Cheap enough to run per segment, and the only way to identify a malformed
+ * intermediate after a kill: when `impliedFps` diverges from the declared frame rate,
+ * the file's timestamps disagree with its content, and that is the kind of input that
+ * makes a rate converter allocate without bound.
+ */
+async function inspect(file: string): Promise<Record<string, unknown>> {
+  try {
+    const { stdout } = await ffprobe(['-print_format', 'json', '-show_streams', '-show_format', file]);
+    const data = JSON.parse(stdout.toString()) as {
+      streams: { codec_type: string; nb_frames?: string; avg_frame_rate?: string }[];
+      format: { duration?: string; size?: string };
+    };
+    const video = data.streams.find((v) => v.codec_type === 'video');
+    const seconds = Number(data.format.duration ?? 0);
+    const frames = Number(video?.nb_frames ?? 0);
+
+    return {
+      seconds: Number(seconds.toFixed(2)),
+      frames,
+      fps: video?.avg_frame_rate,
+      impliedFps: seconds > 0 ? Number((frames / seconds).toFixed(1)) : null,
+      sizeMb: Math.round(Number(data.format.size ?? 0) / 1_048_576),
+    };
+  } catch {
+    return { probe: 'failed' };
+  }
+}
+
 /** A crossfade longer than half the shortest clip would swallow it whole. */
 function pickTransitionDuration(clips: NormalizedClip[]): number {
   const shortest = Math.min(...clips.map((c) => c.duration));
@@ -179,6 +210,15 @@ async function stitchBatch(
   if (batch.length === 1) return batch[0]!;
 
   const out = path.join(config.paths.workDir, `stitch-${reelId}-l${level}-${index}.mp4`);
+
+  // Logged before the call so a kill leaves evidence of what it was fed. A segment whose
+  // frame count does not match its duration is the signature of a timestamp anomaly,
+  // which is the kind of input that makes a filter allocate without bound.
+  for (const segment of batch) {
+    const stats = await inspect(segment.file);
+    logger.info({ file: path.basename(segment.file), ...stats }, 'stitch input');
+  }
+
   await ffmpeg(buildStitchArgs(batch, transition, out, crf, preset), { timeoutMs: 60 * 60_000 });
 
   return {

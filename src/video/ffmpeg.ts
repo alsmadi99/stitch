@@ -65,8 +65,12 @@ export function encoderArgs(crf = config.video.crf, preset = config.video.preset
     String(Math.max(0, Math.round(crf))),
     '-pix_fmt',
     'yuv420p',
-    '-r',
-    String(config.video.fps),
+    // Deliberately no `-r`. Normalize already pins every clip to a constant frame rate
+    // with the `fps` filter, so re-asserting an output rate here is redundant — and it
+    // is the one remaining step that can invent frames: given an input whose timestamps
+    // jump, the rate converter duplicates frames to fill the gap, without bound.
+    '-fps_mode',
+    'passthrough',
     '-c:a',
     'aac',
     '-b:a',
