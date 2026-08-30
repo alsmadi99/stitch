@@ -8,6 +8,9 @@ import { DiskFullError } from './ingest/ingest.js';
 import { runPipeline } from './pipeline.js';
 import { isQuotaError } from './youtube/upload.js';
 
+/** How often to re-check whether the compile that blocked us has finished. */
+const BUSY_POLL_MS = 5000;
+
 export type StopReason =
   | 'complete'
   | 'quota'
@@ -70,7 +73,30 @@ export async function drainHistory(client: Client, options: DrainOptions = {}): 
     }
 
     try {
-      const result = await runPipeline('threshold');
+      // `busy` means a compile is already under way — usually the live collector
+      // reacting to a clip this scan just ingested. Carrying on regardless would keep
+      // downloading while that reel builds, and the queue grows without bound: the
+      // whole point of building at the threshold is to hold roughly one reel's worth of
+      // clips on disk at a time. So wait for it, then take our turn.
+      let result = await runPipeline('threshold');
+      let waited = 0;
+
+      while (result.status === 'busy') {
+        if (options.shouldStop?.()) {
+          stoppedBy = 'cancelled';
+          detail = 'stopped on request while waiting for a compile to finish';
+          return false;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, BUSY_POLL_MS));
+        waited += BUSY_POLL_MS;
+        if (waited % 60_000 === 0) {
+          logger.info({ waitedSeconds: waited / 1000 }, 'waiting for the current compile');
+        }
+
+        result = await runPipeline('threshold');
+      }
+
       if (result.status === 'uploaded' || result.status === 'compiled') reels++;
       report();
 

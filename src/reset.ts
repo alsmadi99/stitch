@@ -39,7 +39,11 @@ export async function resetState(): Promise<ResetSummary> {
   const wipe = db.transaction(() => {
     db.prepare('DELETE FROM clips').run();
     db.prepare('DELETE FROM reels').run();
-    db.prepare('DELETE FROM kv').run();
+    // Everything except the job bookkeeping. `job:state` is what marks a backfill as
+    // running, and wiping it mid-run erased the job's own record of itself — which in
+    // turn defeated the CLI's "one backfill at a time" guard and let a second one be
+    // queued on top of the first.
+    db.prepare("DELETE FROM kv WHERE key NOT LIKE 'job:%'").run();
     // Restart ids (and therefore episode numbering) from 1 rather than continuing.
     db.prepare("DELETE FROM sqlite_sequence WHERE name IN ('clips', 'reels')").run();
   });
