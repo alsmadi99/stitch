@@ -41,6 +41,10 @@
     background-clip:text; color:transparent;
   }
   .tagline{font-size:clamp(1.05rem,2.4vw,1.3rem); color:var(--muted); max-width:34ch; margin:0 auto}
+  .selfhost{
+    margin:14px auto 0; font-size:.86rem; color:var(--sky); letter-spacing:.04em;
+    text-transform:uppercase; font-weight:600; opacity:.85;
+  }
   .cta{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:32px}
   .btn{
     display:inline-block; padding:12px 24px; border-radius:11px; font-weight:600;
@@ -138,9 +142,10 @@
 
   <h1>Stitch</h1>
   <p class="tagline">Twenty ragged clips in. One seamless reel out.</p>
+  <p class="selfhost">Self-hosted · your server, your channel, your clips · MIT licensed</p>
 
   <div class="cta">
-    <a class="btn btn-primary" href="https://github.com/YOUR_USER/stitch">View on GitHub</a>
+    <a class="btn btn-primary" data-repo href="https://github.com/">View on GitHub</a>
     <a class="btn btn-ghost" href="#start">Get started</a>
   </div>
 </header>
@@ -229,7 +234,7 @@
   You do not need YouTube credentials to try it — leave them blank and reels are
   compiled locally so you can watch one before pointing it at a real channel.</p>
 <pre><span class="c"># clone and install</span>
-git clone https://github.com/YOUR_USER/stitch.git
+git clone https://github.com/<span data-repo-slug>your-user/stitch</span>.git
 cd stitch &amp;&amp; npm install &amp;&amp; cp .env.example .env
 
 <span class="c"># check every integration point — changes nothing</span>
@@ -242,10 +247,36 @@ npm run <span class="p">dev</span></pre>
 <footer>
   <div class="foot">
     <span>MIT licensed · Built with TypeScript, discord.js and ffmpeg</span>
-    <span><a href="https://github.com/YOUR_USER/stitch">GitHub</a> · <a href="https://github.com/YOUR_USER/stitch/blob/main/CONTRIBUTING.md">Contributing</a></span>
+    <span><a data-repo href="https://github.com/">GitHub</a> · <a data-repo="/blob/main/CONTRIBUTING.md" href="https://github.com/">Contributing</a></span>
   </div>
 </footer>
 
 </div>
+<script>
+  /* GitHub Pages serves this at https://<user>.github.io/<repo>/, which is enough to
+     work out where the source lives. Deriving it means a fork gets working links with
+     nothing to find and replace — which matters for a tool people are meant to host
+     themselves. Falls back to a sensible guess when opened from a file or elsewhere. */
+  (function () {
+    var host = location.hostname;
+    var repoPath = location.pathname.split('/').filter(Boolean)[0];
+    var slug = null;
+
+    if (host.endsWith('.github.io')) {
+      var user = host.replace('.github.io', '');
+      slug = user + '/' + (repoPath || 'stitch');
+    }
+    if (!slug) return;
+
+    var base = 'https://github.com/' + slug;
+    document.querySelectorAll('[data-repo]').forEach(function (el) {
+      var suffix = el.getAttribute('data-repo') || '';
+      el.href = base + suffix;
+    });
+    document.querySelectorAll('[data-repo-slug]').forEach(function (el) {
+      el.textContent = slug;
+    });
+  })();
+</script>
 </body>
 </html>

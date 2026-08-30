@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0E1533"/><stop offset="1" stop-color="#141F4B"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5BC8F5"/><stop offset="1" stop-color="#3B6FE0"/>
+    </linearGradient>
+    <linearGradient id="ear" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4FB4EA"/><stop offset="1" stop-color="#2F58C4"/>
+    </linearGradient>
+    <linearGradient id="txt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#7BE0FF"/>
+    </linearGradient>
+    <radialGradient id="glow" cx=".22" cy=".5" r=".6">
+      <stop offset="0" stop-color="#3B6FE0" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#3B6FE0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+
+  <!-- mascot -->
+  <g transform="translate(96,152) scale(0.66)">
+    <circle cx="256" cy="262" r="176" fill="none" stroke="#7BE0FF" stroke-width="8"
+            stroke-linecap="round" stroke-dasharray="26 20" opacity=".45"/>
+    <g fill="url(#ear)">
+      <path d="M150 152c-26-44-22-84 6-92 27-8 52 22 62 74z"/>
+      <path d="M362 152c26-44 22-84-6-92-27-8-52 22-62 74z"/>
+    </g>
+    <path d="M256 122c78 0 132 54 132 128 0 76-58 128-132 128s-132-52-132-128c0-74 54-128 132-128z" fill="url(#body)"/>
+    <path d="M256 124v34M256 352v26" stroke="#0E1533" stroke-width="6" opacity=".4"/>
+    <g stroke="#EAF6FF" stroke-width="8" stroke-linecap="round" opacity=".95">
+      <path d="M240 136l32 18"/><path d="M240 166l32 18"/><path d="M240 336l32 18"/><path d="M240 366l32 18"/>
+    </g>
+    <g fill="#0E1533" opacity=".28">
+      <rect x="150" y="196" width="22" height="16" rx="5"/><rect x="150" y="240" width="22" height="16" rx="5"/><rect x="150" y="284" width="22" height="16" rx="5"/>
+      <rect x="340" y="196" width="22" height="16" rx="5"/><rect x="340" y="240" width="22" height="16" rx="5"/><rect x="340" y="284" width="22" height="16" rx="5"/>
+    </g>
+    <ellipse cx="206" cy="232" rx="30" ry="34" fill="#0E1533"/><ellipse cx="306" cy="232" rx="30" ry="34" fill="#0E1533"/>
+    <circle cx="215" cy="221" r="10" fill="#fff"/><circle cx="315" cy="221" r="10" fill="#fff"/>
+    <path d="M212 300c14 22 30 33 44 33s30-11 44-33" fill="none" stroke="#0E1533" stroke-width="12" stroke-linecap="round"/>
+  </g>
+
+  <!-- wordmark -->
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif">
+    <text x="470" y="272" font-size="118" font-weight="700" fill="url(#txt)" letter-spacing="-3">Stitch</text>
+    <text x="474" y="330" font-size="34" fill="#9BB0D8">Twenty ragged clips in. One seamless reel out.</text>
+    <text x="474" y="392" font-size="25" fill="#5BC8F5" font-weight="600" letter-spacing="2">SELF-HOSTED DISCORD → YOUTUBE BOT</text>
+  </g>
+
+  <!-- film strip along the bottom -->
+  <rect x="0" y="592" width="1280" height="48" fill="#0A1029"/>
+  <g fill="#5BC8F5" opacity=".35">
+    <rect x="30" y="608" width="34" height="18" rx="5"/><rect x="104" y="608" width="34" height="18" rx="5"/>
+    <rect x="178" y="608" width="34" height="18" rx="5"/><rect x="252" y="608" width="34" height="18" rx="5"/>
+    <rect x="326" y="608" width="34" height="18" rx="5"/><rect x="400" y="608" width="34" height="18" rx="5"/>
+    <rect x="474" y="608" width="34" height="18" rx="5"/><rect x="548" y="608" width="34" height="18" rx="5"/>
+    <rect x="622" y="608" width="34" height="18" rx="5"/><rect x="696" y="608" width="34" height="18" rx="5"/>
+    <rect x="770" y="608" width="34" height="18" rx="5"/><rect x="844" y="608" width="34" height="18" rx="5"/>
+    <rect x="918" y="608" width="34" height="18" rx="5"/><rect x="992" y="608" width="34" height="18" rx="5"/>
+    <rect x="1066" y="608" width="34" height="18" rx="5"/><rect x="1140" y="608" width="34" height="18" rx="5"/>
+    <rect x="1214" y="608" width="34" height="18" rx="5"/>
+  </g>
+</svg>

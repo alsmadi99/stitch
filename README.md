@@ -5,14 +5,16 @@
 <h1 align="center">Stitch</h1>
 
 <p align="center">
-  A Discord bot that collects your community's gaming clips, throws away the duplicates,
-  and sews the rest into one video on YouTube — weekly, or whenever twenty pile up.
+  A self-hosted Discord bot that collects your community's gaming clips, throws away the
+  duplicates, and sews the rest into one video on YouTube — weekly, or whenever twenty
+  pile up. Your server, your channel, your clips.
 </p>
 
 <p align="center">
   <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A520.11-3B6FE0">
   <img alt="TypeScript" src="https://img.shields.io/badge/typescript-strict-5BC8F5">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-0E1533">
+  <img alt="Self-hosted" src="https://img.shields.io/badge/self--hosted-yes-5BC8F5">
 </p>
 
 ---
@@ -64,7 +66,7 @@ than most of us can say.
 ## Quick start
 
 ```bash
-git clone https://github.com/YOUR_USER/stitch.git
+git clone https://github.com/<your-user>/stitch.git
 cd stitch
 npm install
 cp .env.example .env

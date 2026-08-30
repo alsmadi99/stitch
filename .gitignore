@@ -49,5 +49,8 @@ coverage/
 Thumbs.db
 desktop.ini
 
-.jt
+# Scratch dot-directories, but never GitHub's own config: `.*/**` on its own silently
+# swallows .github/, so workflows and issue templates could never be committed.
 .*/**
+!.github/
+!.github/**
