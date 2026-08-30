@@ -88,6 +88,8 @@ export class FfmpegError extends Error {
     /** Set when the process was killed rather than exiting on its own. */
     readonly signal: NodeJS.Signals | null = null,
     readonly timedOut = false,
+    /** The command that failed. Without it, a kill leaves nothing to diagnose. */
+    readonly args: string[] = [],
   ) {
     super(message);
     this.name = 'FfmpegError';
@@ -108,6 +110,7 @@ interface RunResult {
 function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     logger.debug({ bin, args }, 'spawn');
+
     const startedAt = Date.now();
     const child = spawn(bin, args, { windowsHide: true });
 
@@ -124,6 +127,16 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
       if (err.length > 64_000) err = err.slice(-32_000);
     });
 
+    // memory.stat is a *current* reading, so sampling it after the process dies reports
+    // the memory it already released — useless for explaining why it died. Poll while it
+    // runs and keep the high-water mark instead.
+    let peakAnonMb = 0;
+    const sampler = setInterval(() => {
+      const anon = memorySnapshot().anonMb;
+      if (anon !== null && anon > peakAnonMb) peakAnonMb = anon;
+    }, 1000);
+    sampler.unref();
+
     let timedOut = false;
     if (opts.timeoutMs) {
       timer = setTimeout(() => {
@@ -139,6 +152,7 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
 
     child.on('close', (code, signal) => {
       if (timer) clearTimeout(timer);
+      clearInterval(sampler);
 
       if (code === 0) {
         resolve({ stdout: Buffer.concat(out), stderr: err });
@@ -160,8 +174,8 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
         const facts = [
           mem.limitMb !== null ? `limit ${mem.limitMb}MB` : 'no container memory limit',
           mem.peakMb !== null ? `peak ${mem.peakMb}MB` : null,
-          mem.anonMb !== null ? `anon ${mem.anonMb}MB` : null,
-          mem.cacheMb !== null ? `cache ${mem.cacheMb}MB` : null,
+          peakAnonMb > 0 ? `peak anon ${peakAnonMb}MB while running` : null,
+          mem.cacheMb !== null ? `cache now ${mem.cacheMb}MB` : null,
           `config ${config.video.width}x${config.video.height} batch ${config.video.stitchBatch}`,
           mem.oomKills !== null ? `${mem.oomKills} OOM kill(s) on this container` : null,
         ]
@@ -181,7 +195,10 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
         message = `${bin} exited ${code}: ${lastLine}`;
       }
 
-      reject(new FfmpegError(message, code, err, signal, timedOut));
+      // The command is the one thing that makes a kill diagnosable at all, so it goes
+      // in the log even though it is long.
+      logger.error({ bin, args, signal, code }, 'ffmpeg command failed');
+      reject(new FfmpegError(message, code, err, signal, timedOut, args));
     });
   });
 }
