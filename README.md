@@ -66,7 +66,7 @@ than most of us can say.
 ## Quick start
 
 ```bash
-git clone https://github.com/<your-user>/stitch.git
+git clone https://github.com/alsmadi99/stitch.git
 cd stitch
 npm install
 cp .env.example .env

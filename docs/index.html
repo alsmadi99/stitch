@@ -32,8 +32,41 @@
   a{color:var(--accent); text-decoration:none}
   a:hover{text-decoration:underline}
 
+  /* ---------- navbar ---------- */
+  .nav{
+    position:sticky; top:0; z-index:20;
+    background:rgba(14,21,51,.82); backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav-inner{
+    max-width:1060px; margin:0 auto; padding:11px 24px;
+    display:flex; align-items:center; gap:20px;
+  }
+  .brand{display:flex; align-items:center; gap:9px; font-weight:700; color:#fff; letter-spacing:-.01em}
+  .brand:hover{text-decoration:none}
+  .nav-links{display:flex; gap:22px; margin-left:auto; font-size:.93rem}
+  .nav-links a{color:var(--muted)}
+  .nav-links a:hover{color:var(--pale); text-decoration:none}
+  .star{
+    display:inline-flex; align-items:center; gap:7px; padding:7px 14px;
+    border:1px solid rgba(123,224,255,.34); border-radius:9px; font-size:.88rem;
+    font-weight:600; color:var(--pale); background:rgba(123,224,255,.08);
+    transition:background .15s ease, border-color .15s ease;
+  }
+  .star:hover{background:rgba(123,224,255,.16); border-color:var(--sky); text-decoration:none}
+  .star svg{color:#FFD34D}
+  .star .count{
+    padding-left:8px; margin-left:1px; border-left:1px solid rgba(123,224,255,.28);
+    color:var(--sky); font-variant-numeric:tabular-nums;
+  }
+  @media (max-width:620px){
+    .nav-links{display:none}
+    .star{margin-left:auto}
+  }
+
   /* ---------- hero ---------- */
-  header{padding:76px 0 56px; text-align:center}
+  header{padding:56px 0 56px; text-align:center; scroll-margin-top:70px}
+  section{scroll-margin-top:70px}
   .logo{width:120px;height:120px;filter:drop-shadow(0 18px 40px rgba(59,111,224,.4))}
   h1{
     font-size:clamp(2.9rem,8vw,4.6rem); margin:.35em 0 .1em; letter-spacing:-.03em;
@@ -111,7 +144,35 @@
 </head>
 <body>
 
-<div class="wrap">
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top" aria-label="Stitch home">
+      <svg viewBox="0 0 512 512" width="28" height="28" aria-hidden="true">
+        <rect width="512" height="512" rx="112" fill="#0E1533"/>
+        <path d="M256 122c78 0 132 54 132 128 0 76-58 128-132 128s-132-52-132-128c0-74 54-128 132-128z" fill="#5BC8F5"/>
+        <g stroke="#EAF6FF" stroke-width="14" stroke-linecap="round"><path d="M236 150l40 22"/><path d="M236 340l40 22"/></g>
+        <ellipse cx="206" cy="232" rx="26" ry="30" fill="#0E1533"/><ellipse cx="306" cy="232" rx="26" ry="30" fill="#0E1533"/>
+      </svg>
+      <span>Stitch</span>
+    </a>
+
+    <div class="nav-links">
+      <a href="#why">Why</a>
+      <a href="#how">How it works</a>
+      <a href="#start">Get started</a>
+    </div>
+
+    <a class="star" href="https://github.com/alsmadi99/stitch" aria-label="Star Stitch on GitHub">
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="currentColor">
+        <path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25z"/>
+      </svg>
+      <span>Star</span>
+      <span class="count" id="stars" hidden></span>
+    </a>
+  </div>
+</nav>
+
+<div class="wrap" id="top">
 
 <header>
   <svg class="logo" viewBox="0 0 512 512" role="img" aria-label="Stitch logo">
@@ -145,12 +206,12 @@
   <p class="selfhost">Self-hosted · your server, your channel, your clips · MIT licensed</p>
 
   <div class="cta">
-    <a class="btn btn-primary" data-repo href="https://github.com/">View on GitHub</a>
+    <a class="btn btn-primary" href="https://github.com/alsmadi99/stitch">View on GitHub</a>
     <a class="btn btn-ghost" href="#start">Get started</a>
   </div>
 </header>
 
-<section>
+<section id="why">
   <h2>Why <span class="em">Stitch</span>?</h2>
   <p>Because that is literally the job. Every crossfade is a stitch, the reel is the
   quilt, and <code>ffmpeg</code> is the sewing machine doing the needlework at three in
@@ -165,7 +226,7 @@
   into a family. <strong>Nothing gets left in the queue.</strong></p>
 </section>
 
-<section>
+<section id="how">
   <h2>How it works</h2>
   <div class="flow">
     <span class="node">#gaming-clips</span><span class="arrow">→</span>
@@ -234,7 +295,7 @@
   You do not need YouTube credentials to try it — leave them blank and reels are
   compiled locally so you can watch one before pointing it at a real channel.</p>
 <pre><span class="c"># clone and install</span>
-git clone https://github.com/<span data-repo-slug>your-user/stitch</span>.git
+git clone https://github.com/alsmadi99/stitch.git
 cd stitch &amp;&amp; npm install &amp;&amp; cp .env.example .env
 
 <span class="c"># check every integration point — changes nothing</span>
@@ -247,36 +308,23 @@ npm run <span class="p">dev</span></pre>
 <footer>
   <div class="foot">
     <span>MIT licensed · Built with TypeScript, discord.js and ffmpeg</span>
-    <span><a data-repo href="https://github.com/">GitHub</a> · <a data-repo="/blob/main/CONTRIBUTING.md" href="https://github.com/">Contributing</a></span>
+    <span><a href="https://github.com/alsmadi99/stitch">GitHub</a> · <a href="https://github.com/alsmadi99/stitch/blob/main/CONTRIBUTING.md">Contributing</a> · <a href="https://github.com/alsmadi99/stitch/blob/main/LICENSE">MIT</a></span>
   </div>
 </footer>
 
 </div>
 <script>
-  /* GitHub Pages serves this at https://<user>.github.io/<repo>/, which is enough to
-     work out where the source lives. Deriving it means a fork gets working links with
-     nothing to find and replace — which matters for a tool people are meant to host
-     themselves. Falls back to a sensible guess when opened from a file or elsewhere. */
-  (function () {
-    var host = location.hostname;
-    var repoPath = location.pathname.split('/').filter(Boolean)[0];
-    var slug = null;
-
-    if (host.endsWith('.github.io')) {
-      var user = host.replace('.github.io', '');
-      slug = user + '/' + (repoPath || 'stitch');
-    }
-    if (!slug) return;
-
-    var base = 'https://github.com/' + slug;
-    document.querySelectorAll('[data-repo]').forEach(function (el) {
-      var suffix = el.getAttribute('data-repo') || '';
-      el.href = base + suffix;
-    });
-    document.querySelectorAll('[data-repo-slug]').forEach(function (el) {
-      el.textContent = slug;
-    });
-  })();
+  /* Live star count, purely decorative. The unauthenticated API is rate limited per IP,
+     so a failure is expected sometimes and the badge simply stays as "Star". */
+  fetch('https://api.github.com/repos/alsmadi99/stitch')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (!d || typeof d.stargazers_count !== 'number') return;
+      var el = document.getElementById('stars');
+      el.textContent = d.stargazers_count.toLocaleString();
+      el.hidden = false;
+    })
+    .catch(function () {});
 </script>
 </body>
 </html>
