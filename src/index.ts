@@ -23,7 +23,6 @@ async function main(): Promise<void> {
       // Logged because an OOM is almost always explained by these four numbers, and
       // without them the logs cannot tell you which config was actually in force.
       video: `${config.video.width}x${config.video.height}@${config.video.fps}`,
-      stitchBatch: config.video.stitchBatch,
       ffmpegThreads: config.video.threads,
       maxClipSeconds: config.video.maxClipSeconds,
     },

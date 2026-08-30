@@ -180,7 +180,7 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
           mem.peakMb !== null ? `peak ${mem.peakMb}MB` : null,
           peakAnonMb > 0 ? `peak anon ${peakAnonMb}MB while running` : null,
           mem.cacheMb !== null ? `cache now ${mem.cacheMb}MB` : null,
-          `config ${config.video.width}x${config.video.height} batch ${config.video.stitchBatch}`,
+          `config ${config.video.width}x${config.video.height}`,
           mem.oomKills !== null ? `${mem.oomKills} OOM kill(s) on this container` : null,
         ]
           .filter(Boolean)
@@ -302,25 +302,21 @@ export function containerMemoryLimitMb(): number | null {
 }
 
 /**
- * Rough peak RSS for one stitch call, used to warn before a run rather than discovering
- * the ceiling through an OOM kill.
+ * Rough peak RSS for the heaviest step of a compile.
  *
- * Fitted to measurements at 1080p — 1030MB at batch 3, 1200MB at 4, 1450MB at 5 — which
- * gives roughly 380MB fixed plus 215MB per input held open, scaled by pixel count.
+ * This used to scale with how many segments were joined at once, because the old
+ * compiler fed whole segments to `xfade` and memory grew with the reel. It no longer
+ * does: every ffmpeg call now handles one clip, or two half-second transition inputs,
+ * so the peak is essentially a single encode plus the bot. Measured at 253MB for a
+ * 20 clip 720p reel inside a 1GB container.
  *
- * Those measurements used synthetic test patterns, and the margin below is what stands
- * between the model and real footage. It started at 1.25 and was raised after a real
- * deployment: the model predicted 1531MB for 1080p at batch 3, and the kernel recorded
- * a peak of 3072MB before killing ffmpeg. High-motion gameplay retains far more
- * reference data than a test pattern, so an optimistic estimate here is worse than
- * useless — it reads "comfortable" right up until the OOM.
+ * The margin is kept because real gameplay allocates more than a test pattern.
  */
 const REAL_FOOTAGE_MARGIN = 2;
 
 export function estimatedStitchPeakMb(): number {
   const pixelRatio = (config.video.width * config.video.height) / (1920 * 1080);
-  const base = 380 + 215 * config.video.stitchBatch;
-  return Math.round(base * pixelRatio * REAL_FOOTAGE_MARGIN);
+  return Math.round((120 + 260 * pixelRatio) * REAL_FOOTAGE_MARGIN);
 }
 
 let filterCache: Set<string> | null = null;

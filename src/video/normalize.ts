@@ -19,7 +19,16 @@ export interface NormalizedClip {
  * a silent track synthesised when the source has none. xfade requires every input to
  * match, and loudnorm is what stops one screaming clip from blowing out the mix.
  */
-export async function normalizeClip(clip: ClipRow, index: number): Promise<NormalizedClip> {
+export async function normalizeClip(
+  clip: ClipRow,
+  index: number,
+  /**
+   * Where the reel will later cut this clip. Keyframes are placed there so the cut is
+   * cheap and clean; the body is re-encoded regardless, so this is an optimisation
+   * rather than a correctness requirement.
+   */
+  cutPoints: number[] = [],
+): Promise<NormalizedClip> {
   const { width, height, maxClipSeconds } = config.video;
   if (!clip.file_path) throw new Error(`clip ${clip.id} has no downloaded file`);
 
@@ -93,6 +102,11 @@ export async function normalizeClip(clip: ClipRow, index: number): Promise<Norma
     ...encoderArgs(),
     out,
   );
+
+  const cuts = cutPoints.filter((t) => t > 0 && t < duration).map((t) => t.toFixed(3));
+  if (cuts.length > 0) {
+    args.splice(args.length - 1, 0, '-force_key_frames', cuts.join(','));
+  }
 
   await ffmpeg(args, { timeoutMs: 10 * 60_000 });
 
