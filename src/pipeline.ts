@@ -9,6 +9,8 @@ import { compileReel } from './video/compile.js';
 import { buildDescription, buildTags, buildTitle } from './youtube/metadata.js';
 import { isQuotaError, isRetryableUploadError, uploadReel, type UploadResult } from './youtube/upload.js';
 import { announceFailure, announceReel } from './discord/notify.js';
+import { client } from './discord/client.js';
+import { filterVetoed } from './discord/reactions.js';
 
 export type Trigger = 'threshold' | 'cron' | 'manual';
 
@@ -216,7 +218,27 @@ export async function runPipeline(trigger: Trigger): Promise<RunResult> {
   if (!acquireLock()) return { status: 'busy' };
 
   running = true;
-  const batch = clipsRepo.takePending(config.trigger.maxClips);
+
+  // Asked of Discord rather than assumed from the database: a veto added while the bot
+  // was restarting never reached the event handler, and putting a visibly-crossed clip
+  // into a reel is the one mistake this feature exists to prevent.
+  const candidates = clipsRepo.takePending(config.trigger.maxClips);
+  const { kept, vetoed } = await filterVetoed(client, candidates).catch(() => ({
+    kept: candidates,
+    vetoed: [],
+  }));
+
+  if (vetoed.length > 0) {
+    logger.info({ dropped: vetoed.length, remaining: kept.length }, 'vetoed clips removed before compiling');
+  }
+
+  const batch = kept;
+
+  if (batch.length === 0) {
+    running = false;
+    releaseLock();
+    return { status: 'skipped', reason: 'every candidate clip was vetoed' };
+  }
   const reelId = reelsRepo.createReel(batch.length);
   const log = logger.child({ reelId, trigger });
 

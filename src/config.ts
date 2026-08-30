@@ -45,7 +45,7 @@ const schema = z.object({
   ANNOUNCE_CHANNEL_ID: str(),
   ADMIN_ROLE_IDS: csv(),
   ADMIN_USER_IDS: csv(),
-  REJECT_REACTION: str('❌'),
+  REJECT_REACTION: csv(['❌', '✖️', '❎']),
   VETO_ALLOWED: z
     .string()
     .optional()
@@ -164,7 +164,7 @@ export const config = {
     announceChannelId: env.ANNOUNCE_CHANNEL_ID || env.CLIPS_CHANNEL_ID,
     adminRoleIds: env.ADMIN_ROLE_IDS,
     adminUserIds: env.ADMIN_USER_IDS,
-    rejectReaction: env.REJECT_REACTION,
+    rejectReactions: env.REJECT_REACTION,
     vetoAllowed: env.VETO_ALLOWED,
   },
   trigger: {

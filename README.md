@@ -202,27 +202,34 @@ compared with `blackdetect` against `silencedetect`:
 The residual is bounded rather than progressive, which is the part that matters: it does
 not get worse as a reel gets longer.
 
-### Memory is a dial
+### Memory does not scale with the reel
 
-The stitch step dominates everything else. Measured peak RSS for one ffmpeg call:
+Reels are assembled from pieces rather than joined as wholes:
 
-| Inputs held open | 1080p | 720p |
+```
+body₀ · transition₀ · body₁ · transition₁ · … · bodyₙ
+```
+
+Every ffmpeg call handles **one clip**, or **two half-second inputs** for a transition,
+so nothing ever holds more than a fraction of a second of video. Audio is built in one
+separate pass with `-vn`; audio frames are kilobytes, so every clip can be open at once.
+
+This replaced a design that fed `xfade` two long segments and asked it to blend at the
+end. That buffered roughly the whole crossfade offset as decoded frames — 2772MB
+measured against 66s x 30fps x 1.4MB — and no batch size or resolution avoided it,
+because the offset grows with the reel however the joins are arranged.
+
+Measured on a 20 clip, 3.7 minute reel from mixed 480p/720p/1080p/1440p sources, inside
+a container capped at 1536MB:
+
+| | 720p | 1080p |
 | --- | --- | --- |
-| 3 | 1030 MB | 495 MB |
-| 4 | 1200 MB | 615 MB |
-| 5 | 1450 MB | 705 MB |
+| Peak memory | 253 MB | 506 MB |
+| Compile time | 64 s | 105 s |
+| Worst A/V offset | 167 ms | 167 ms |
 
-Each extra input costs roughly 215 MB at 1080p, because every one keeps its own decoder
-and frame buffers alive for the whole call. Joining 20 clips in a single invocation
-would need about **4.5 GB** and get OOM-killed on an 8 GB host.
-
-So clips are folded `STITCH_BATCH` at a time into a tree: 20 clips at batch 4 become 5
-segments, then 2, then 1. Peak memory is set by the batch size instead of the reel
-length, at the cost of one extra encode pass per level. Intermediate levels encode fast
-and at high quality, so the extra passes cost time rather than fidelity.
-
-Dropping to 720p roughly halves both memory and encode time, and is the single biggest
-lever if compiles feel slow.
+The A/V offset fluctuates rather than accumulating, which is the property that matters:
+it does not get worse as a reel gets longer.
 
 ### The thumbnail
 

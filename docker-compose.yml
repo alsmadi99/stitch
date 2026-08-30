@@ -46,10 +46,11 @@ services:
       INGEST_CONCURRENCY: 1
       X264_PRESET: veryfast
 
-      # 720p. Now a quality/speed choice rather than a memory one — 1080p should fit
-      # comfortably too, but change one thing at a time.
-      OUTPUT_WIDTH: 1280
-      OUTPUT_HEIGHT: 720
+      # 1080p. Purely a quality/speed choice now: the compiler assembles bodies and
+      # half-second transitions, so peak memory is a single encode rather than something
+      # that grows with the reel. Drop to 1280x720 to roughly halve encode time.
+      OUTPUT_WIDTH: 1920
+      OUTPUT_HEIGHT: 1080
 
       # --- disk ---
       # Discord's own upload cap is 500 MB with Nitro; 200 MB skips the rare huge file.

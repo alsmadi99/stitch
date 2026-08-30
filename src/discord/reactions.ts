@@ -20,6 +20,24 @@ const EXCLUDED_MARK = '🚫';
 const ACCEPTED_MARK = '✅';
 
 /**
+ * Emoji comparison, tolerant of the variation selector.
+ *
+ * Clients disagree about whether to send U+FE0F after a symbol, so `❌` from one client
+ * is not string-equal to `❌` from another. Discord also has several crosses — U+274C,
+ * U+2716 and U+274E all read as "no" to a person — and a veto silently ignored because
+ * the wrong one was picked is worse than no feature at all.
+ */
+function normalizeEmoji(name: string): string {
+  return name.replace(/️|︎/g, '');
+}
+
+export function isVetoEmoji(name: string | null): boolean {
+  if (!name) return false;
+  const seen = normalizeEmoji(name);
+  return config.discord.rejectReactions.some((e) => normalizeEmoji(e) === seen);
+}
+
+/**
  * Lets a clip be pulled out of the queue by reacting to it in Discord.
  *
  * The veto is its own clip status rather than reusing `rejected`, which means "ingest
@@ -43,7 +61,7 @@ export function registerReactions(client: Client): void {
     );
   });
 
-  logger.info({ emoji: config.discord.rejectReaction }, 'clip veto reaction active');
+  logger.info({ emoji: config.discord.rejectReactions }, 'clip veto reaction active');
 }
 
 async function handle(
@@ -55,13 +73,22 @@ async function handle(
 
   // Reactions on messages the bot has not cached — anything backfilled — arrive partial.
   if (reaction.partial) await reaction.fetch();
-  if (reaction.emoji.name !== config.discord.rejectReaction) return;
 
   const message = reaction.message.partial ? await reaction.message.fetch() : reaction.message;
   if (message.channelId !== config.discord.clipsChannelId) return;
 
   const clips = clipsRepo.findByMessageId(message.id);
   if (clips.length === 0) return;
+
+  if (!isVetoEmoji(reaction.emoji.name)) {
+    // Logged rather than dropped: a reaction on a tracked clip that just misses the
+    // configured emoji is almost always someone trying to veto with the wrong cross.
+    logger.debug(
+      { emoji: reaction.emoji.name, messageId: message.id, accepted: config.discord.rejectReactions },
+      'reaction on a tracked clip did not match the veto emoji',
+    );
+    return;
+  }
 
   const actor = user.partial ? await user.fetch() : user;
   if (!(await isAllowed(actor.id, clips, message))) {
@@ -151,6 +178,58 @@ async function isAllowed(userId: string, clips: ClipRow[], message: Message): Pr
   }
 
   return mayVeto(config.discord.vetoAllowed, { owner, admin, author });
+}
+
+/**
+ * Drops clips whose message currently carries the veto reaction.
+ *
+ * The event handler above only sees reactions that arrive while the bot is connected. A
+ * ❌ added before this feature existed, or during a redeploy, or while the gateway was
+ * reconnecting, is never delivered and nothing would ever notice it — the clip would go
+ * into a reel despite visibly being vetoed in the channel.
+ *
+ * So the reel build asks Discord directly rather than trusting that it saw everything.
+ * One message fetch per clip is nothing against the minutes a compile takes.
+ */
+export async function filterVetoed(
+  client: Client,
+  clips: ClipRow[],
+): Promise<{ kept: ClipRow[]; vetoed: ClipRow[] }> {
+  const channel = await client.channels.fetch(config.discord.clipsChannelId).catch(() => null);
+  if (!channel?.isTextBased()) return { kept: clips, vetoed: [] };
+
+  const kept: ClipRow[] = [];
+  const vetoed: ClipRow[] = [];
+
+  for (const clip of clips) {
+    const message = await channel.messages.fetch(clip.message_id).catch(() => null);
+
+    // A deleted message cannot be inspected. Keeping the clip matches what the rest of
+    // the pipeline does — the file is already downloaded and nobody vetoed it.
+    if (!message) {
+      kept.push(clip);
+      continue;
+    }
+
+    const hasVeto = message.reactions.cache.some((r) => isVetoEmoji(r.emoji.name));
+    if (!hasVeto) {
+      kept.push(clip);
+      continue;
+    }
+
+    clipsRepo.setStatus(clip.id, 'excluded', 'vetoed in Discord, caught at build time');
+    vetoed.push(clip);
+    await markMessage(message, 'exclude').catch(() => undefined);
+  }
+
+  if (vetoed.length > 0) {
+    logger.warn(
+      { vetoed: vetoed.length, clipIds: vetoed.map((c) => c.id) },
+      'dropped vetoed clips that the gateway never reported',
+    );
+  }
+
+  return { kept, vetoed };
 }
 
 /** Swaps the bot's own ✅ for 🚫 so the queue state is visible in the channel. */
