@@ -8,7 +8,7 @@ import { hasYtDlp } from './ingest/download.js';
 import { beat } from './heartbeat.js';
 import { startHttpServer } from './http.js';
 import { recoverInterruptedJob, startJobRunner } from './jobs.js';
-import { isRunning, recoverInterruptedReels, retryPendingUploads } from './pipeline.js';
+import { clearStaleLock, isRunning, recoverInterruptedReels, retryPendingUploads } from './pipeline.js';
 import { cleanStaleWorkFiles } from './video/compile.js';
 import { maybeRunOnThreshold, startScheduler } from './scheduler/index.js';
 import { db } from './db/index.js';
@@ -37,6 +37,9 @@ async function main(): Promise<void> {
   // finish. Put them back in the queue before anything else runs.
   recoverInterruptedReels();
   recoverInterruptedJob();
+  // Nothing can legitimately hold the compile lock at boot; a leftover one would block
+  // every future reel, and inside a container the pid check cannot spot it.
+  clearStaleLock();
   await cleanStaleWorkFiles();
 
   registerCollector(client, maybeRunOnThreshold);

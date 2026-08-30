@@ -87,6 +87,54 @@ let running = false;
 
 const LOCK_FILE = path.join(config.paths.dataDir, 'compile.lock');
 
+/**
+ * Identifies this run of this process, not just its pid.
+ *
+ * A pid alone is useless as a liveness check inside a container, where the bot is
+ * always pid 1: a lock left behind by a killed process names pid 1, the next boot is
+ * also pid 1, and "is the holder alive?" answers yes forever. That deadlocks compiling
+ * permanently — every trigger is skipped and clips queue up with nothing consuming them.
+ */
+const INSTANCE = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+
+interface LockHolder {
+  pid: number;
+  instance: string;
+  since: string;
+}
+
+function readLock(): LockHolder | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(LOCK_FILE, 'utf8')) as Partial<LockHolder>;
+    if (typeof parsed.pid !== 'number' || typeof parsed.instance !== 'string') return null;
+    return { pid: parsed.pid, instance: parsed.instance, since: parsed.since ?? '' };
+  } catch {
+    return null;
+  }
+}
+
+/** Only a lock this very process wrote can be treated as genuinely held. */
+function heldByAnother(holder: LockHolder): boolean {
+  if (holder.instance === INSTANCE) return false;
+  return isAlive(holder.pid);
+}
+
+/**
+ * Clears a lock left over from a previous life of this container.
+ *
+ * Called once at startup, where nothing can legitimately be compiling: any process that
+ * held the lock died with the container that hosted it.
+ */
+export function clearStaleLock(): void {
+  const holder = readLock();
+  if (!holder) {
+    fs.rmSync(LOCK_FILE, { force: true });
+    return;
+  }
+  logger.warn({ heldSince: holder.since, pid: holder.pid }, 'cleared a stale compile lock');
+  fs.rmSync(LOCK_FILE, { force: true });
+}
+
 /** True when *this* process is compiling. */
 export function isRunning(): boolean {
   return running;
@@ -100,12 +148,8 @@ export function isRunning(): boolean {
  */
 export function isCompilingAnywhere(): boolean {
   if (running) return true;
-  try {
-    const holder = Number(fs.readFileSync(LOCK_FILE, 'utf8').trim());
-    return Number.isFinite(holder) && holder > 0 && isAlive(holder);
-  } catch {
-    return false;
-  }
+  const holder = readLock();
+  return holder ? heldByAnother(holder) : false;
 }
 
 /**
@@ -119,19 +163,21 @@ export function isCompilingAnywhere(): boolean {
  * A lock left behind by a killed process is taken over once its pid is gone.
  */
 function acquireLock(): boolean {
+  const payload = JSON.stringify({ pid: process.pid, instance: INSTANCE, since: new Date().toISOString() });
+
   try {
-    fs.writeFileSync(LOCK_FILE, String(process.pid), { flag: 'wx' });
+    fs.writeFileSync(LOCK_FILE, payload, { flag: 'wx' });
     return true;
   } catch {
-    const holder = Number(fs.readFileSync(LOCK_FILE, 'utf8').trim());
+    const holder = readLock();
 
-    if (Number.isFinite(holder) && holder > 0 && isAlive(holder)) {
-      logger.warn({ holder }, 'another process is compiling — skipping');
+    if (holder && heldByAnother(holder)) {
+      logger.warn({ holder: holder.pid, since: holder.since }, 'another process is compiling — skipping');
       return false;
     }
 
-    logger.warn({ holder }, 'took over a stale compile lock');
-    fs.writeFileSync(LOCK_FILE, String(process.pid));
+    logger.warn({ holder: holder?.pid ?? null }, 'took over a stale compile lock');
+    fs.writeFileSync(LOCK_FILE, payload);
     return true;
   }
 }
