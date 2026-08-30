@@ -12,7 +12,11 @@
 # The defaults below are 1080p with STITCH_BATCH=3. Measured on synthetic footage that
 # peaks near 1.2 GB including Node, but real gameplay carries much larger reference
 # buffers — a 1536 MB limit was enough for the test clips and got ffmpeg OOM-killed on
-# real ones, which surfaces as "killed by SIGKILL" with no error output. Hence 2 GB.
+# real ones, which surfaces as "killed by SIGKILL" with no error output.
+#
+# Now 3 GB. This is a ceiling, not a reservation — the container only ever uses what
+# ffmpeg actually asks for (~1.5 GB at 1080p), so raising it costs no memory and simply
+# stops the kernel intervening before ffmpeg is finished.
 #
 # For half the memory and roughly twice the speed, uncomment the 720p block.
 
@@ -71,13 +75,13 @@ services:
       resources:
         limits:
           # Above the measured 1080p/batch-3 peak with headroom for Node and the OS.
-          memory: 2048M
+          memory: 3072M
           cpus: '2.0'
         reservations:
           memory: 256M
 
     # Compose v2 standalone ignores deploy.resources; these are the equivalent.
-    mem_limit: 2048m
+    mem_limit: 3072m
     mem_reservation: 256m
     cpus: 2.0
 
