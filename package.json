@@ -18,6 +18,7 @@
     "format:check": "prettier --check \"**/*.{ts,js,mjs,json,md,yml,yaml}\"",
     "doctor": "tsx scripts/doctor.ts",
     "youtube:auth": "tsx scripts/youtube-auth.ts",
+    "youtube:cleanup": "tsx scripts/youtube-cleanup.ts",
     "backfill": "tsx scripts/backfill.ts",
     "backfill:status": "tsx scripts/backfill.ts --status",
     "reel:now": "tsx scripts/run-now.ts"

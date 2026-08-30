@@ -160,11 +160,36 @@ npm run backfill -- --scan-only
 running in the background, because a full history walk outlives the 15-minute
 interaction token; watch it with `/clips status`.
 
-**It will stop before finishing the first time, and that is expected.** YouTube allows
-10,000 quota units a day and charges 1,600 per upload, so six uploads is the hard
-daily ceiling. `BACKFILL_MAX_REELS` (default 5) stops the run cleanly below it, and a
-quota error mid-run is caught rather than burning the rest of the queue on failures.
-Run it again the next day to continue where it stopped.
+### Why a large history takes more than one day
+
+YouTube allows 10,000 quota units a day and charges 1,600 per upload. **Six uploads a
+day is a hard ceiling** — the seventh fails with `quotaExceeded` no matter how the bot
+is configured. A 200-clip history is ten reels, so it takes two days at minimum. No
+setting changes that.
+
+What the bot does about it is keep going anyway, without needing you:
+
+1. It builds reels past the quota and keeps them on disk as `pending_upload`.
+2. The hourly retry sweep uploads them as quota frees up.
+3. When the backlog drains, the scan **resumes itself** and carries on.
+
+So one `npm run backfill` eventually publishes the whole channel. There is nothing to
+re-run.
+
+Two dials bound it:
+
+| Variable                 | Default | Purpose                                              |
+| ------------------------ | ------- | ---------------------------------------------------- |
+| `BACKFILL_MAX_REELS`     | `0`     | Hard cap per run. 0 = unlimited                       |
+| `MAX_PENDING_UPLOADS`    | `3`     | Built-but-unuploaded reels allowed to pile up         |
+| `BACKFILL_AUTO_CONTINUE` | `true`  | Resume the scan once uploads drain                    |
+
+`MAX_PENDING_UPLOADS` is really a disk dial: each finished reel waiting on quota sits in
+`data/out/` until it goes up. Raising it builds further ahead at the cost of disk;
+lowering it keeps disk flat and simply pauses the scan more often.
+
+A run that stops for quota reports `stoppedBy: pendingCap` and is picked up again
+automatically. Only `complete` and `error` are left alone.
 
 ## Slash commands
 
@@ -193,6 +218,49 @@ When a reel is uploaded the bot posts the YouTube link on its own — no embed, 
 buttons, no call to action. Discord unfurls the link into a player card itself.
 
 The bot reacts to each clip message: ✅ queued, ♻️ duplicate, ⚠️ rejected.
+
+## Vetoing a clip
+
+React with ❌ (`REJECT_REACTION`) on a clip in the channel and it is pulled out of the
+queue — it will not appear in the next reel or any later one. The bot swaps its ✅ for
+🚫 so the state is visible in the channel. Remove the reaction to put it back.
+
+`VETO_ALLOWED` decides who it listens to. `ADMIN_USER_IDS` always works; the setting
+only widens the circle beyond it, and everyone else is ignored and logged.
+
+| `VETO_ALLOWED` | you | a mod with Manage Server | the clip's author | anyone else |
+| -------------- | --- | ------------------------ | ----------------- | ----------- |
+| `owner` (default) | yes | no                    | no                | no          |
+| `admins`       | yes | yes                      | no                | no          |
+| `authors`      | yes | yes                      | yes               | no          |
+
+With `ADMIN_ROLE_IDS` set, that column becomes "a member holding one of those roles"
+instead of Manage Server.
+
+The author case only applies when every clip on the message is theirs — a post carrying
+several clips cannot be half withdrawn.
+
+A reaction is not a permission check in itself — anyone who can see the channel can add
+one — so the bot decides who it obeys and ignores the rest. The default is the
+restrictive end: only the accounts named in `ADMIN_USER_IDS`. Widening it is a
+deliberate opt-in, and worth considering, since a veto publishes nothing, spends no
+quota, and is undone by removing the reaction.
+
+A veto is its own clip status rather than reusing `rejected`, which means "ingest
+failed". That distinction is what makes it stick: when a reel fails, its clips are
+returned to the queue by moving rows out of `used` — and a vetoed clip is no longer
+`used`, so it is never picked back up. Verified: veto a clip inside a building reel,
+fail the reel, and every other clip returns while the vetoed one stays excluded.
+
+The source file is deliberately kept rather than deleted, which is what makes removing
+the reaction able to restore it. Vetoes are rare and manual, so the disk cost is noise.
+
+If the reel has already been uploaded the clip is in a published video and no database
+change can take it out; the veto is still recorded so the clip never enters a future
+reel, and the log says so.
+
+Vetoing works on backfilled clips too — reactions on messages posted long before the
+bot started arrive uncached, which is why the client enables the Reaction partial.
 
 ## Restarts and redeploys
 
@@ -240,8 +308,14 @@ Three layers, cheapest first:
 2. **SHA-256 of the file bytes** — catches the same file reposted verbatim.
 3. **Perceptual fingerprint** — five frames sampled at 10/30/50/70/90% of the clip,
    each reduced to a 64-bit dHash. Two clips are the same when their mean Hamming
-   distance is under `PHASH_THRESHOLD` (default 8) *and* their durations are within
-   1.5s of each other.
+   distance is under `PHASH_THRESHOLD` (default 8) and their durations are within a
+   generous window (±25%, minimum ±3s). The window is only a prefilter to bound how
+   many comparisons run — the threshold is what decides a match — so it is deliberately
+   loose. A tight window let the same clip through twice when a different capture tool
+   had trimmed it a second or two differently.
+
+   A clip re-posted with *drastically* different trimming can still slip past, because
+   the sample points are proportional and land on different content.
 
 Layer 3 is the one that matters in practice: it catches a clip re-uploaded through
 Medal, or trimmed and recompressed by a different capture tool. Measured on
@@ -334,6 +408,66 @@ there is nothing to re-run for.
 
 `/clips status` and `/health` both report how many reels are waiting to upload.
 
+## Clip timing
+
+Every timing decision is taken from the source's **video stream**, never the container.
+A container reports the longest stream, and screen recorders routinely emit audio that
+runs past the picture — timing a reel off that number asks ffmpeg for frames that do not
+exist, and it fills the gap by freezing the last one. A 5.0s video with a 5.8s audio
+track produced an 800ms stall at the end of that clip.
+
+Targets are floored to whole frames rather than rounded, so they are always reachable,
+with `tpad` as a safety net for decode variance.
+
+Verified by compiling a reel where half the sources have audio longer than video, then
+scanning the result with `freezedetect`: zero frozen segments, total duration within
+34ms of prediction, streams within 10ms of each other.
+
+## Audio/video sync
+
+Every normalized clip is pinned to one frame-aligned duration on **both** streams
+(`trim` on video, `apad` + `atrim` on audio). Left to themselves, video lands on a
+30fps boundary while audio lands on an AAC frame boundary that `loudnorm` has also
+lengthened, leaving each clip with audio tens of milliseconds longer than its picture.
+
+Stitching then places audio explicitly rather than using `acrossfade`. Chained across a
+batch, `acrossfade` builds an audio timeline roughly 1024 samples (~21 ms at 48 kHz)
+shorter per join than the video timeline `xfade` builds from the same durations — so
+every join slides sound a little further ahead of picture. Instead each segment's audio
+is delayed to the exact offset its video uses, faded, and summed with `amix`, which
+makes the two agree by construction.
+
+Measured on twelve clips carrying a white flash and a 1 kHz beep at the same instant,
+comparing `blackdetect` against `silencedetect` in the finished reel:
+
+| | first marker | last marker | worst |
+| --- | --- | --- | --- |
+| `acrossfade` (before) | +3 ms | −321 ms | **−323 ms**, growing every join |
+| explicit timeline (after) | +3 ms | −44 ms | **−44 ms**, not accumulating |
+
+The remaining offset is bounded rather than progressive, which is the part that
+matters: it does not get worse as a reel gets longer.
+
+## Replacing a bad upload
+
+YouTube cannot swap the file behind an existing video — an upload is bound to its id
+permanently, and the Data API has no replace call. A corrected reel is always a new
+link, so a bad batch has to be deleted and rebuilt.
+
+```bash
+npm run youtube:cleanup
+```
+
+Lists what it would delete and stops. Add `--yes` to actually delete, `--keep N` to
+spare the newest N reels.
+
+**Run it before `backfill --restart`.** The reset wipes the reel table, and those rows
+are the only record of which video ids belong to the bot; afterwards the old uploads
+can only be removed by hand in YouTube Studio.
+
+Deleting costs 50 quota units per video against the 10,000 daily budget — trivial next
+to the 1,600 an upload costs.
+
 ## Monetization
 
 It cannot be turned on through the YouTube Data API — there is no field for it on a
@@ -352,6 +486,11 @@ Two things the bot does control, both of which quietly kill monetization if wron
 
 ## Gotchas worth knowing
 
+- **`YOUTUBE_PRIVACY` only applies when `YOUTUBE_AUTO_PUBLISH=true`.** With
+  auto-publish off — the default — every upload is created private no matter what
+  `YOUTUBE_PRIVACY` says, and publishing is a separate deliberate act. The two settings
+  used to be independent, so `PRIVACY=public` with `AUTO_PUBLISH=false` read as safe and
+  published everything on upload. `npm run doctor` prints the effective privacy.
 - **Unverified Google Cloud projects can only upload private videos.** The API accepts
   `privacyStatus: "public"` and locks the video as private anyway, and `/reel publish`
   comes back 403 Forbidden. Until the project passes API verification, publishing is a
@@ -596,6 +735,8 @@ ones you are most likely to touch:
 | `BACKFILL_MAX_REELS`  | `5`                 | Reels per backfill run, under the daily quota  |
 | `MIN_FREE_DISK_MB`    | `2048`              | Ingest refuses to run below this               |
 | `HTTP_PORT`           | `3000`              | `/health` endpoint; 0 disables it              |
+| `REJECT_REACTION`     | `❌`                | React with this to pull a clip from the queue  |
+| `VETO_ALLOWED`        | `owner`             | `owner` / `admins` / `authors` — who it obeys  |
 
 For a vertical Shorts cut, set `OUTPUT_WIDTH=1080`, `OUTPUT_HEIGHT=1920` and
 `MAX_CLIP_SECONDS` low enough to keep the reel under 60s.

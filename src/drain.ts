@@ -2,12 +2,20 @@ import type { Client } from 'discord.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { countPending } from './db/clips.js';
+import { pendingUploadCount } from './db/reels.js';
 import { backfill, type BackfillStats } from './discord/collector.js';
 import { DiskFullError } from './ingest/ingest.js';
 import { runPipeline } from './pipeline.js';
 import { isQuotaError } from './youtube/upload.js';
 
-export type StopReason = 'complete' | 'quota' | 'deferred' | 'maxReels' | 'disk' | 'error';
+export type StopReason =
+  | 'complete'
+  | 'quota'
+  | 'deferred'
+  | 'pendingCap'
+  | 'maxReels'
+  | 'disk'
+  | 'error';
 
 export interface DrainResult extends BackfillStats {
   reels: number;
@@ -57,13 +65,15 @@ export async function drainHistory(client: Client, options: DrainOptions = {}): 
       if (result.status === 'uploaded' || result.status === 'compiled') reels++;
       report();
 
-      // The upload was deferred — almost always quota. Compiling more reels now would
-      // just queue more videos behind the same wall, so stop and let the retry sweep
-      // drain them once the quota resets.
-      if (result.status === 'deferred') {
-        stoppedBy = 'deferred';
+      // A deferred upload is almost always the daily quota, which no amount of waiting
+      // in this run will fix. Rather than stopping outright, keep building ahead — the
+      // retry sweep uploads them as quota frees up — but only while the finished videos
+      // waiting to go out stay within MAX_PENDING_UPLOADS, since each one sits on disk.
+      if (result.status === 'deferred' && pendingUploadCount() >= config.ingest.maxPendingUploads) {
+        stoppedBy = 'pendingCap';
         detail =
-          'a reel is built but the upload was deferred (usually the daily quota). It uploads automatically once the quota resets — no need to re-run for it';
+          `${pendingUploadCount()} built reels are waiting on the daily upload quota. ` +
+          'They upload themselves as it resets, and the scan continues automatically once there is room';
         return false;
       }
 

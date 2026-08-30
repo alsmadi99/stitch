@@ -45,6 +45,12 @@ const schema = z.object({
   ANNOUNCE_CHANNEL_ID: str(),
   ADMIN_ROLE_IDS: csv(),
   ADMIN_USER_IDS: csv(),
+  REJECT_REACTION: str('❌'),
+  VETO_ALLOWED: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === '' ? 'owner' : v.trim()))
+    .pipe(z.enum(['owner', 'admins', 'authors'])),
 
   REEL_MAX_CLIPS: num(20),
   REEL_MIN_CLIPS: num(5),
@@ -73,7 +79,9 @@ const schema = z.object({
   PHASH_THRESHOLD: num(8),
   MIN_FREE_DISK_MB: num(2048),
   INGEST_CONCURRENCY: num(2),
-  BACKFILL_MAX_REELS: num(5),
+  BACKFILL_MAX_REELS: num(0),
+  MAX_PENDING_UPLOADS: num(3),
+  BACKFILL_AUTO_CONTINUE: bool(true),
 
   YOUTUBE_CLIENT_ID: str(),
   YOUTUBE_CLIENT_SECRET: str(),
@@ -156,6 +164,8 @@ export const config = {
     announceChannelId: env.ANNOUNCE_CHANNEL_ID || env.CLIPS_CHANNEL_ID,
     adminRoleIds: env.ADMIN_ROLE_IDS,
     adminUserIds: env.ADMIN_USER_IDS,
+    rejectReaction: env.REJECT_REACTION,
+    vetoAllowed: env.VETO_ALLOWED,
   },
   trigger: {
     maxClips: env.REEL_MAX_CLIPS,
@@ -189,7 +199,10 @@ export const config = {
     phashThreshold: env.PHASH_THRESHOLD,
     minFreeDiskMb: env.MIN_FREE_DISK_MB,
     concurrency: Math.max(1, env.INGEST_CONCURRENCY),
-    backfillMaxReels: env.BACKFILL_MAX_REELS,
+    // 0 means unlimited: keep building until something else says stop.
+    backfillMaxReels: env.BACKFILL_MAX_REELS > 0 ? env.BACKFILL_MAX_REELS : Number.POSITIVE_INFINITY,
+    maxPendingUploads: Math.max(1, env.MAX_PENDING_UPLOADS),
+    backfillAutoContinue: env.BACKFILL_AUTO_CONTINUE,
   },
   youtube: {
     clientId: env.YOUTUBE_CLIENT_ID,

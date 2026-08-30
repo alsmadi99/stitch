@@ -62,14 +62,28 @@ export function takePending(limit: number): ClipRow[] {
     .all(limit) as ClipRow[];
 }
 
+/** Every clip extracted from one message — a post can carry several. */
+export function findByMessageId(messageId: string): ClipRow[] {
+  return db
+    .prepare('SELECT * FROM clips WHERE message_id = ? ORDER BY id')
+    .all(messageId) as ClipRow[];
+}
+
 export function findByContentHash(hash: string): ClipRow | undefined {
   return db
     .prepare("SELECT * FROM clips WHERE content_hash = ? AND status != 'duplicate' LIMIT 1")
     .get(hash) as ClipRow | undefined;
 }
 
-/** Candidates for perceptual comparison: fingerprinted clips of a similar length. */
-export function findByDurationWindow(duration: number, slack = 1.5): ClipRow[] {
+/**
+ * Candidates for perceptual comparison: fingerprinted clips of a similar length.
+ *
+ * The window is only a cheap prefilter — the fingerprint threshold is what actually
+ * decides a match — so it is generous. A fixed 1.5s was too tight: the same clip
+ * re-posted from a different capture tool is often trimmed a second or two differently
+ * at each end, which put it outside the window and let a duplicate into the reel.
+ */
+export function findByDurationWindow(duration: number, slack = Math.max(3, duration * 0.25)): ClipRow[] {
   return db
     .prepare(
       `SELECT * FROM clips

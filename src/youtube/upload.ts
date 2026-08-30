@@ -18,6 +18,19 @@ export interface UploadResult {
 }
 
 /**
+ * The privacy a new upload is created with.
+ *
+ * `YOUTUBE_AUTO_PUBLISH=false` now genuinely means "do not publish": the upload is
+ * forced private regardless of `YOUTUBE_PRIVACY`, and going public is a separate,
+ * deliberate act. Previously the two settings looked related but were not — a config of
+ * `PRIVACY=public` with `AUTO_PUBLISH=false` read as safe and published everything the
+ * moment it was uploaded.
+ */
+export function uploadPrivacy(): 'private' | 'unlisted' | 'public' {
+  return config.youtube.autoPublish ? config.youtube.privacy : 'private';
+}
+
+/**
  * Resumable upload of the finished reel.
  *
  * Note: a Google Cloud project that has not passed API verification can only create
@@ -28,7 +41,10 @@ export async function uploadReel(input: UploadInput): Promise<UploadResult> {
   const youtube = youtubeClient();
   const size = fs.statSync(input.videoPath).size;
 
-  logger.info({ title: input.title, sizeMb: Math.round(size / 1_048_576) }, 'uploading to youtube');
+  logger.info(
+    { title: input.title, sizeMb: Math.round(size / 1_048_576), privacy: uploadPrivacy() },
+    'uploading to youtube',
+  );
 
   const res = await youtube.videos.insert(
     {
@@ -42,7 +58,7 @@ export async function uploadReel(input: UploadInput): Promise<UploadResult> {
           categoryId: config.youtube.categoryId,
         },
         status: {
-          privacyStatus: config.youtube.privacy,
+          privacyStatus: uploadPrivacy(),
           selfDeclaredMadeForKids: false,
         },
       },
@@ -76,7 +92,7 @@ export async function uploadReel(input: UploadInput): Promise<UploadResult> {
   return {
     videoId,
     url: `https://youtu.be/${videoId}`,
-    privacy: res.data.status?.privacyStatus ?? config.youtube.privacy,
+    privacy: res.data.status?.privacyStatus ?? uploadPrivacy(),
   };
 }
 

@@ -23,7 +23,24 @@ export async function normalizeClip(clip: ClipRow, index: number): Promise<Norma
   const { width, height, maxClipSeconds } = config.video;
   if (!clip.file_path) throw new Error(`clip ${clip.id} has no downloaded file`);
 
-  const effective = Math.min(clip.duration ?? maxClipSeconds, maxClipSeconds);
+  // Measured from the source's video stream, not the container. The container reports
+  // the longest stream, so a clip whose audio runs past its picture would otherwise be
+  // given a target the video cannot reach — and ffmpeg fills that gap by freezing the
+  // last frame, which reads as a clip stalling and then cutting out.
+  const source = await probe(clip.file_path);
+  const requested = Math.min(source.videoDuration, maxClipSeconds);
+
+  // Quantised to whole video frames, then forced onto BOTH streams below.
+  //
+  // Left alone, video length lands on a frame boundary while audio lands on an AAC
+  // frame boundary that loudnorm has also lengthened, so each clip comes out with audio
+  // tens of milliseconds longer than its video. xfade builds the video timeline from
+  // video lengths and acrossfade builds the audio timeline from audio lengths, so those
+  // per-clip differences accumulate: measured at +663ms of drift over twelve clips,
+  // which is plainly audible by the end of a reel.
+  // Floored, never rounded up: the target has to be reachable by frames that exist.
+  const duration = Math.floor(requested * config.video.fps) / config.video.fps;
+  const effective = requested;
   const out = path.join(config.paths.workDir, `norm-${String(index).padStart(3, '0')}-${clip.id}.mp4`);
 
   const videoChain = [
@@ -37,10 +54,25 @@ export async function normalizeClip(clip: ClipRow, index: number): Promise<Norma
   const label = await buildLabelFilter(clip, height);
   if (label) videoChain.push(label);
 
+  // Applied last so the label filter cannot shift the frame count. tpad is a safety
+  // net for decode variance — with a floored target it should never clone a frame.
+  videoChain.push(
+    'tpad=stop_mode=clone:stop_duration=0.5',
+    `trim=duration=${duration.toFixed(6)}`,
+    'setpts=PTS-STARTPTS',
+  );
+
   const audioChain = [
-    'aresample=48000:async=1',
+    // first_pts=0 pads the head with silence when a source's audio starts late, which
+    // is the other half of keeping picture and sound aligned.
+    'aresample=48000:async=1:first_pts=0',
     'aformat=sample_fmts=fltp:channel_layouts=stereo',
     'loudnorm=I=-16:TP=-1.5:LRA=11',
+    // apad then atrim pins the audio to exactly `duration`: silence is added if
+    // loudnorm came up short, and anything past the mark is cut.
+    'apad',
+    `atrim=duration=${duration.toFixed(6)}`,
+    'asetpts=PTS-STARTPTS',
   ];
 
   const args: string[] = ['-y', ...threadArgs(), '-t', effective.toFixed(3), '-i', clip.file_path];

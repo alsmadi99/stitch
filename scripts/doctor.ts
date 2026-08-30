@@ -181,7 +181,7 @@ if (!config.youtube.enabled) {
       add(
         'youtube',
         'ok',
-        `uploading to "${channel.snippet?.title}"${who ? ` (${who})` : ''} as ${config.youtube.privacy}`,
+        `uploading to "${channel.snippet?.title}"${who ? ` (${who})` : ''} as ${(await import('../src/youtube/upload.js')).uploadPrivacy()}`,
       );
       // A channel flagged as made-for-kids has personalised ads disabled on every
       // upload, which is the usual reason monetization silently never turns on.

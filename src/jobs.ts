@@ -1,6 +1,8 @@
 import type { Client } from 'discord.js';
+import { config } from './config.js';
 import { kvGet, kvSet } from './db/index.js';
 import { db } from './db/index.js';
+import { pendingUploadCount } from './db/reels.js';
 import { logger } from './logger.js';
 import { describeDrain, drainHistory, type DrainResult } from './drain.js';
 import { resetState } from './reset.js';
@@ -47,6 +49,8 @@ export interface JobState {
   request?: Omit<JobRequest, 'kind' | 'requestedAt'>;
   /** How many times this job has been auto-resumed, to bound a restart loop. */
   resumes?: number;
+  /** Why the last run ended, so the scheduler can decide whether to continue it. */
+  stoppedBy?: string;
 }
 
 /** Enough restarts to survive a rolling deploy; few enough to expose a crash loop. */
@@ -137,6 +141,37 @@ export function recoverInterruptedJob(): void {
   logger.info({ resumes }, 'queued an automatic resume of the interrupted backfill');
 }
 
+/**
+ * Reasons a run ended with work still to do. The daily upload quota is the usual one:
+ * six uploads a day is a hard ceiling, so a large history simply takes several days.
+ * Continuing automatically is what turns that into one command instead of one a day.
+ */
+const CONTINUABLE = new Set(['quota', 'deferred', 'pendingCap', 'maxReels']);
+
+/**
+ * Re-queues a backfill that stopped early, once there is room to upload again. Called
+ * on the scheduler's hourly tick.
+ */
+export function maybeContinueBackfill(): boolean {
+  if (!config.ingest.backfillAutoContinue) return false;
+
+  const state = readJobState();
+  if (!state || state.status !== 'done' || !state.request) return false;
+  if (!state.stoppedBy || !CONTINUABLE.has(state.stoppedBy)) return false;
+
+  // Only worth resuming once the built-but-unuploaded backlog has drained, otherwise
+  // it would immediately stop again on the same cap.
+  const waiting = pendingUploadCount();
+  if (waiting >= config.ingest.maxPendingUploads) {
+    logger.debug({ waiting }, 'not continuing the backfill yet — uploads still queued');
+    return false;
+  }
+
+  logger.info({ stoppedBy: state.stoppedBy, waiting }, 'continuing the backfill automatically');
+  requestBackfill({ ...state.request, restart: false });
+  return true;
+}
+
 let busy = false;
 
 export function startJobRunner(client: Client, intervalMs = 5000): NodeJS.Timeout {
@@ -224,6 +259,7 @@ async function runBackfill(client: Client, request: JobRequest): Promise<void> {
   publish(result.stoppedBy === 'error' ? 'failed' : 'done', {
     finishedAt: new Date().toISOString(),
     detail: describeDrain(result),
+    stoppedBy: result.stoppedBy,
   });
 
   logger.info({ stoppedBy: result.stoppedBy, reels: result.reels }, 'backfill job finished');

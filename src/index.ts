@@ -3,6 +3,7 @@ import { logger } from './logger.js';
 import { client, login } from './discord/client.js';
 import { registerCollector } from './discord/collector.js';
 import { deployCommands, registerCommands } from './discord/commands.js';
+import { registerReactions } from './discord/reactions.js';
 import { hasYtDlp } from './ingest/download.js';
 import { beat } from './heartbeat.js';
 import { startHttpServer } from './http.js';
@@ -25,6 +26,10 @@ async function main(): Promise<void> {
 
   if (!config.youtube.enabled) {
     logger.warn('YouTube is not configured — reels will be compiled locally only');
+  } else if (config.youtube.autoPublish && config.youtube.privacy === 'public') {
+    logger.warn(
+      'YOUTUBE_AUTO_PUBLISH=true with YOUTUBE_PRIVACY=public — every reel goes public the moment it uploads',
+    );
   }
   if (config.ingest.allowLinks) await hasYtDlp();
 
@@ -36,6 +41,7 @@ async function main(): Promise<void> {
 
   registerCollector(client, maybeRunOnThreshold);
   registerCommands(client);
+  registerReactions(client);
 
   await login();
   await deployCommands();

@@ -94,7 +94,6 @@ export async function compileReel(
     const isFinalLevel = batches.length === 1;
     const crf = isFinalLevel ? config.video.crf : INTERMEDIATE_CRF;
     const preset = isFinalLevel ? config.video.preset : INTERMEDIATE_PRESET;
-
     const next: Segment[] = [];
     for (const [i, batch] of batches.entries()) {
       next.push(await stitchBatch(batch, transition, reelId, level, i, crf, preset));
@@ -174,6 +173,17 @@ async function stitchBatch(
   };
 }
 
+/**
+ * Builds one stitch call: xfade for picture, and for sound an explicit timeline rather
+ * than acrossfade.
+ *
+ * acrossfade chained across a batch produces an audio timeline about 1024 samples
+ * (~21ms at 48kHz) shorter per join than the video timeline xfade produces from the
+ * same durations. Measured with flash-and-beep markers, that compounded to 323ms of
+ * audio-ahead drift over twelve clips — inaudible at the first join, obvious by the
+ * last. Placing every segment's audio at the same offset the video uses makes the two
+ * agree by construction instead of by coincidence.
+ */
 function buildStitchArgs(
   segments: Segment[],
   transition: number,
@@ -185,27 +195,50 @@ function buildStitchArgs(
   for (const segment of segments) args.push('-i', segment.file);
 
   const filters: string[] = [];
+  const t = transition.toFixed(3);
+
+  // --- video: chained crossfades ---
   let videoLabel = '0:v';
-  let audioLabel = '0:a';
   let elapsed = segments[0]!.duration;
-  // Keep the transition variety walking across the whole reel rather than resetting
-  // to the first transition inside every batch.
+  // Keep transition variety walking across the whole reel rather than resetting inside
+  // every batch.
   let joinIndex = segments[0]!.clips - 1;
 
   for (let k = 1; k < segments.length; k++) {
-    const offset = elapsed - transition;
     const name = config.video.transitions[joinIndex % config.video.transitions.length] ?? 'fade';
-
     filters.push(
-      `[${videoLabel}][${k}:v]xfade=transition=${name}:duration=${transition.toFixed(3)}:offset=${offset.toFixed(3)}[v${k}]`,
-      `[${audioLabel}][${k}:a]acrossfade=d=${transition.toFixed(3)}:c1=tri:c2=tri[a${k}]`,
+      `[${videoLabel}][${k}:v]xfade=transition=${name}:duration=${t}:offset=${(elapsed - transition).toFixed(3)}[v${k}]`,
     );
-
     videoLabel = `v${k}`;
-    audioLabel = `a${k}`;
     elapsed += segments[k]!.duration - transition;
     joinIndex += segments[k]!.clips;
   }
+
+  // --- audio: same offsets, laid out independently and summed ---
+  const audioLabels: string[] = [];
+  let start = 0;
+
+  for (const [k, segment] of segments.entries()) {
+    const steps: string[] = [];
+    if (k > 0) steps.push(`afade=t=in:st=0:d=${t}`);
+    if (k < segments.length - 1) {
+      steps.push(`afade=t=out:st=${(segment.duration - transition).toFixed(3)}:d=${t}`);
+    }
+
+    const delayMs = Math.round(start * 1000);
+    if (delayMs > 0) steps.push(`adelay=${delayMs}:all=1`);
+    if (steps.length === 0) steps.push('anull');
+
+    filters.push(`[${k}:a]${steps.join(',')}[fa${k}]`);
+    audioLabels.push(`[fa${k}]`);
+    start += segment.duration - transition;
+  }
+
+  // normalize=0 keeps levels intact; the linear fade pair sums to unity across the
+  // overlap, so a crossfade neither dips nor clips.
+  filters.push(
+    `${audioLabels.join('')}amix=inputs=${segments.length}:normalize=0:dropout_transition=0[a]`,
+  );
 
   args.push(
     '-filter_complex',
@@ -213,7 +246,7 @@ function buildStitchArgs(
     '-map',
     `[${videoLabel}]`,
     '-map',
-    `[${audioLabel}]`,
+    '[a]',
     ...encoderArgs(crf, preset),
     out,
   );

@@ -1,4 +1,11 @@
-export type ClipStatus = 'pending' | 'used' | 'duplicate' | 'rejected' | 'failed';
+export type ClipStatus =
+  | 'pending'
+  | 'used'
+  /** Vetoed by a reaction in Discord. Never enters a reel, and survives a reel failure. */
+  | 'excluded'
+  | 'duplicate'
+  | 'rejected'
+  | 'failed';
 export type ReelStatus =
   | 'building'
   | 'ready'

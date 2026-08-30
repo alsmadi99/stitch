@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { countPending } from '../db/clips.js';
 import { isRunning, retryPendingUploads, runPipeline } from '../pipeline.js';
+import { maybeContinueBackfill } from '../jobs.js';
 
 export function startScheduler(): void {
   if (!cron.validate(config.trigger.cron)) {
@@ -26,7 +27,12 @@ export function startScheduler(): void {
   const retries = setInterval(
     () => {
       void retryPendingUploads().then(
-        (n) => n > 0 && logger.info({ uploaded: n }, 'retried deferred uploads'),
+        (n) => {
+          if (n > 0) logger.info({ uploaded: n }, 'retried deferred uploads');
+          // Uploading frees capacity, so check straight after whether the history scan
+          // can pick up where the quota stopped it.
+          maybeContinueBackfill();
+        },
         (err) => logger.error({ err: (err as Error).message }, 'upload retry sweep failed'),
       );
     },
