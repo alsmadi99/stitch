@@ -51,6 +51,12 @@ services:
       # that grows with the reel. Drop to 1280x720 to roughly halve encode time.
       OUTPUT_WIDTH: 1920
       OUTPUT_HEIGHT: 1080
+      # 60fps. Most gameplay is captured at 60, so this stops the pipeline throwing away
+      # half the frames. It roughly doubles encode time and output size; memory is
+      # unaffected, since no ffmpeg call here holds more than a transition.
+      OUTPUT_FPS: 60
+      # 90s cap per clip.
+      MAX_CLIP_SECONDS: 90
 
       # --- disk ---
       # Discord's own upload cap is 500 MB with Nitro; 200 MB skips the rare huge file.

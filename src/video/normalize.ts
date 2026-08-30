@@ -49,7 +49,10 @@ export async function normalizeClip(
   // which is plainly audible by the end of a reel.
   // Floored, never rounded up: the target has to be reachable by frames that exist.
   const duration = Math.floor(requested * config.video.fps) / config.video.fps;
-  const effective = requested;
+  // `-t` is an input option, so it counts along the source's own timeline. A clip whose
+  // timestamps start late needs that offset added or the read stops before the picture
+  // begins; `requested` is a content length, not an end position.
+  const effective = source.videoStart + requested;
   const out = path.join(config.paths.workDir, `norm-${String(index).padStart(3, '0')}-${clip.id}.mp4`);
 
   const videoChain = [
@@ -113,9 +116,12 @@ export async function normalizeClip(
   // loudnorm and frame-rate conversion can shift the length by a few frames, and the
   // transition offsets are computed from these numbers, so re-measure rather than assume.
   const meta = await probe(out);
-  logger.debug({ clipId: clip.id, duration: meta.duration }, 'normalized');
+  logger.debug({ clipId: clip.id, duration: meta.videoDuration }, 'normalized');
 
-  return { clipId: clip.id, file: out, duration: meta.duration };
+  // The picture's length, matching what compile measures every body and transition
+  // against. Taking the container's number here instead makes every cut overshoot the
+  // end of the video by however far the audio runs past it.
+  return { clipId: clip.id, file: out, duration: meta.videoDuration };
 }
 
 /**

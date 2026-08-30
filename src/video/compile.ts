@@ -154,12 +154,32 @@ async function assembleVideo(
 
     // This clip's audio starts `from` seconds into itself, and that instant lands here.
     offsets.push(Math.max(0, position - from));
-    position += (await probe(body)).videoDuration;
+
+    // Requested against produced, for every piece. A piece that comes out longer than it
+    // was asked for is content that appears twice in the reel, and it is invisible in
+    // the finished file unless the difference is recorded here.
+    const bodyActual = (await probe(body)).videoDuration;
+    const bodyWanted = to - from;
+    if (Math.abs(bodyActual - bodyWanted) > 0.15) {
+      log.error(
+        { clipId: clip.clipId, wanted: Number(bodyWanted.toFixed(3)), got: Number(bodyActual.toFixed(3)), from, to },
+        'body piece is not the length it was asked for — expect duplicated or missing footage',
+      );
+    }
+    position += bodyActual;
 
     if (i < clips.length - 1) {
       const trans = await renderTransition(clip, clips[i + 1]!, transition, reelId, i);
       pieces.push(trans);
-      position += (await probe(trans)).videoDuration;
+
+      const transActual = (await probe(trans)).videoDuration;
+      if (Math.abs(transActual - transition) > 0.15) {
+        log.error(
+          { join: i, wanted: transition, got: Number(transActual.toFixed(3)), clipDuration: clip.duration },
+          'transition piece is not the length it was asked for — expect duplicated footage',
+        );
+      }
+      position += transActual;
     }
   }
 

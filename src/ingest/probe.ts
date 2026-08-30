@@ -4,14 +4,20 @@ export interface ProbeResult {
   /** Container duration — the longest stream. Use `videoDuration` for timing decisions. */
   duration: number;
   /**
-   * Duration of the video stream alone.
+   * Length of the picture itself, with any leading timestamp offset removed.
    *
    * Screen recorders routinely emit audio a little longer than video, and the container
    * reports the longer of the two. Timing a reel off that number asks ffmpeg for
    * picture that does not exist, and it fills the gap by freezing the last frame.
+   *
+   * ffprobe derives a stream's `duration` from its timestamps, so a file that does not
+   * start at zero reports its content plus the offset. Subtracting `start_time` is what
+   * makes this a length rather than an end position.
    */
   videoDuration: number;
   audioDuration: number;
+  /** Timestamp the picture starts at. Reading the whole file means seeking past this. */
+  videoStart: number;
   width: number;
   height: number;
   hasAudio: boolean;
@@ -24,6 +30,7 @@ interface FfprobeStream {
   width?: number;
   height?: number;
   duration?: string;
+  start_time?: string;
 }
 
 interface FfprobeOutput {
@@ -57,10 +64,20 @@ export async function probe(file: string): Promise<ProbeResult> {
     return Number.isFinite(n) && n > 0 ? n : duration;
   };
 
+  const startTime = (stream: FfprobeStream): number => {
+    const n = Number(stream.start_time ?? NaN);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+
+  /** End timestamp minus start timestamp: how much picture or sound actually exists. */
+  const contentLength = (stream: FfprobeStream): number =>
+    Math.max(0, streamDuration(stream.duration) - startTime(stream));
+
   return {
     duration,
-    videoDuration: streamDuration(video.duration),
-    audioDuration: audio ? streamDuration(audio.duration) : 0,
+    videoDuration: contentLength(video),
+    audioDuration: audio ? contentLength(audio) : 0,
+    videoStart: startTime(video),
     width: video.width ?? 0,
     height: video.height ?? 0,
     hasAudio: Boolean(audio),

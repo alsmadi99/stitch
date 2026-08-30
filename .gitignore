@@ -33,6 +33,7 @@ yarn-error.log*
 .jt/
 .jg/
 .rt/
+.realtest/
 .tmp/
 tmp/
 coverage/
@@ -49,8 +50,11 @@ coverage/
 Thumbs.db
 desktop.ini
 
+.*/**
+
 # Scratch dot-directories, but never GitHub's own config: `.*/**` on its own silently
 # swallows .github/, so workflows and issue templates could never be committed.
-.*/**
 !.github/
 !.github/**
+# Local test corpora (downloaded clips, scratch databases). Never committed.
+.testdata/

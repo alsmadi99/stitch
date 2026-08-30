@@ -55,8 +55,18 @@ Some real examples from its history:
 - A tree level with a leftover batch of exactly one deleted the file the next level was
   about to read. It only reproduced at specific clip counts.
 
-So: if you change normalize, stitch, or anything touching durations and offsets, include
-the measurement in the PR. Concretely, one of these:
+Start with the one that already exists:
+
+```bash
+npm run verify
+```
+
+It builds a reel from deliberately awkward clips and asserts every one appears in its own
+slot, fully and exactly once. If your change breaks the pipeline, this is the cheapest
+way to find out.
+
+Beyond that, if you change normalize, stitch, or anything touching durations and offsets,
+include the measurement in the PR. Concretely, one of these:
 
 - **Sync** — build clips with a simultaneous flash and beep, compile, and compare
   `blackdetect` output against `silencedetect`.
@@ -64,8 +74,9 @@ the measurement in the PR. Concretely, one of these:
 - **Freezing** — run `freezedetect` over the result and expect zero segments.
 - **Memory** — sample peak RSS of the ffmpeg process if you change how many inputs are
   held open at once.
-- **Tree shapes** — clip counts that produce a remainder of one at some level, since
-  that is where the batching logic breaks.
+- **Awkward inputs** — variable frame rate, timestamps that do not start at zero, audio
+  longer than video. `npm run verify` already covers these; extend it rather than
+  testing by hand.
 
 "It looked fine when I watched it" is not a measurement. A 300ms drift is inaudible in
 the first ten seconds.
@@ -83,8 +94,13 @@ Before changing these, know why they exist:
 - **Vetoed clips get their own status, not `rejected`.** Reel failure returns `used`
   rows to the queue; a vetoed clip must not come back, and a distinct status is what
   makes that fall out naturally rather than needing a special case.
-- **`STITCH_BATCH` exists to bound memory,** not for tidiness. Raising it past 5 at
-  1080p will OOM an 8 GB host.
+- **Reels are assembled from bodies and half-second transitions, not joined whole.**
+  The obvious approach — hand `xfade` two long segments and blend at the end — buffered
+  roughly the whole crossfade offset as decoded frames and was OOM-killed at 3 GB. No
+  batching scheme avoided it, because the offset grows with the reel. Keep every ffmpeg
+  call bounded to one clip or two half-second inputs.
+- **Bodies are re-encoded rather than stream-copied.** A copy is far cheaper but can only
+  cut on a keyframe, which put the soundtrack four seconds out over twenty clips.
 
 If you disagree with one, say so in an issue first — these are opinions with reasons,
 and reasons can be wrong, but rediscovering them through an outage is expensive.
@@ -98,8 +114,9 @@ Include:
   ones. **Redact your tokens** — `DISCORD_TOKEN` and `YOUTUBE_REFRESH_TOKEN` grant full
   control of your bot and channel.
 - `npm run doctor` output, which reports versions and configuration without secrets.
-- For video problems: clip count, resolution, and `STITCH_BATCH`. Sample footage helps
-  enormously if you can share it.
+- For video problems: clip count, resolution, and the output of `npm run verify`. Sample
+  footage helps enormously if you can share it — most pipeline bugs here only appeared
+  with real capture output.
 
 ## Style
 

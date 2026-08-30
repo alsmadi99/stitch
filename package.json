@@ -16,6 +16,7 @@
     "format": "prettier --write \"**/*.{ts,js,mjs,json,md,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,js,mjs,json,md,yml,yaml}\"",
     "doctor": "tsx scripts/doctor.ts",
+    "verify": "tsx scripts/verify-pipeline.ts",
     "youtube:auth": "tsx scripts/youtube-auth.ts",
     "youtube:cleanup": "tsx scripts/youtube-cleanup.ts",
     "backfill": "tsx scripts/backfill.ts",
