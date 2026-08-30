@@ -131,6 +131,7 @@ npm run backfill:stop     # ask a running backfill to stop at its next checkpoin
 npm run doctor            # verify every integration point
 npm run reel:now          # compile and upload immediately
 npm run rebuild -- --episode 8   # rebuild episode #8 from its original clips
+npm run rebuild -- --episode 8 --yes --detach   # ... in the background, survives a closed terminal
 npm run youtube:cleanup   # delete videos this bot uploaded
 ```
 

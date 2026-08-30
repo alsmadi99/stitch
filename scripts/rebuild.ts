@@ -27,7 +27,11 @@
  *                                               ... and upload it privately for review
  *   npm run rebuild -- --episode 8 --yes --upload --private --replace-youtube
  *                                               ... and delete the old video afterwards
+ *
+ * Add `--detach` to any of these to run it in the background and return immediately.
+ * The command prints a log file to tail; the terminal can then be closed.
  */
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -59,6 +63,40 @@ const wantUpload = flag('upload');
 const replaceYoutube = flag('replace-youtube');
 const refetch = flag('refetch');
 const private_ = flag('private');
+const detach = flag('detach');
+
+/**
+ * Re-launches this script detached, so the work outlives the shell that started it.
+ *
+ * A hosting panel's web terminal closes its pty when the session times out, which hangs
+ * up every process in that session's group — a rebuild that is twenty minutes into an
+ * encode dies with it. `detached` puts the child in a session of its own, and the log
+ * file stands in for a stdout that is about to disappear.
+ */
+if (detach && !process.env.STITCH_DETACHED) {
+  const slug = option('episode') ?? option('reel') ?? (flag('last') ? 'last' : 'reel');
+  const logFile = path.join(config.paths.dataDir, `rebuild-${slug}-${Date.now()}.log`);
+  const handle = fs.openSync(logFile, 'a');
+
+  const child = spawn(
+    process.execPath,
+    [...process.execArgv, process.argv[1]!, ...argv.filter((a) => a !== '--detach')],
+    {
+      detached: true,
+      stdio: ['ignore', handle, handle],
+      env: { ...process.env, STITCH_DETACHED: '1' },
+    },
+  );
+  child.unref();
+
+  console.log('');
+  console.log(`rebuild running in the background, pid ${child.pid}`);
+  console.log(`  watch:  tail -f ${logFile}`);
+  console.log(`  check:  tail -30 ${logFile}`);
+  console.log('');
+  console.log('Safe to close this terminal.');
+  process.exit(0);
+}
 
 function target(): ReturnType<typeof getReel> {
   if (flag('last')) return latestReel();
