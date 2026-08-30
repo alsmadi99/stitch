@@ -146,11 +146,24 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
         const limit = Math.round((opts.timeoutMs ?? 0) / 1000);
         message = `${bin} was killed after exceeding its ${limit}s timeout (ran ${elapsed}s)`;
       } else if (signal) {
+        const mem = memorySnapshot();
+        const facts = [
+          mem.limitMb !== null ? `limit ${mem.limitMb}MB` : 'no container memory limit',
+          mem.peakMb !== null ? `peak ${mem.peakMb}MB` : null,
+          mem.oomKills !== null ? `${mem.oomKills} OOM kill(s) on this container` : null,
+        ]
+          .filter(Boolean)
+          .join(', ');
+
+        const confirmedOom = (mem.oomKills ?? 0) > 0;
         message =
-          `${bin} was killed by ${signal} after ${elapsed}s with no error output. ` +
-          'That is almost always the kernel OOM killer reclaiming memory after the ' +
-          'container hit its limit — lower STITCH_BATCH, drop OUTPUT_HEIGHT to 720, ' +
-          'or raise the memory limit.';
+          `${bin} was killed by ${signal} after ${elapsed}s with no error output ` +
+          `(${facts}). ` +
+          (confirmedOom
+            ? 'The kernel OOM counter confirms it ran out of memory — lower STITCH_BATCH, ' +
+              'set OUTPUT_HEIGHT=720, or raise the container memory limit.'
+            : 'No OOM was recorded against this container, so look for an external kill: ' +
+              'a redeploy, a manual stop, or the host itself being out of memory.');
       } else {
         message = `${bin} exited ${code}: ${lastLine}`;
       }
@@ -174,6 +187,49 @@ export function ffprobe(args: string[]): Promise<RunResult> {
  */
 export function escapeFilterPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/:/g, '\\:');
+}
+
+function readCgroup(...files: string[]): string | null {
+  for (const file of files) {
+    try {
+      return fs.readFileSync(file, 'utf8').trim();
+    } catch {
+      // Not in a container, or this cgroup version does not expose the file.
+    }
+  }
+  return null;
+}
+
+export interface MemorySnapshot {
+  limitMb: number | null;
+  peakMb: number | null;
+  /** Kernel OOM kills counted against this cgroup since boot. */
+  oomKills: number | null;
+}
+
+/**
+ * What the kernel says about this container's memory, so an OOM can be reported as a
+ * fact rather than as a guess. `memory.events` counts OOM kills against the cgroup, and
+ * that counter rising is the difference between "probably out of memory" and "the
+ * kernel killed it".
+ */
+export function memorySnapshot(): MemorySnapshot {
+  const events = readCgroup('/sys/fs/cgroup/memory.events');
+  const oomFromV2 = events?.match(/^oom_kill (\d+)$/m)?.[1];
+  const oomFromV1 = readCgroup('/sys/fs/cgroup/memory/memory.failcnt');
+
+  const toMb = (raw: string | null): number | null => {
+    if (raw === null || raw === 'max') return null;
+    const bytes = Number(raw);
+    if (!Number.isFinite(bytes) || bytes <= 0 || bytes > 2 ** 52) return null;
+    return Math.round(bytes / 1_048_576);
+  };
+
+  return {
+    limitMb: containerMemoryLimitMb(),
+    peakMb: toMb(readCgroup('/sys/fs/cgroup/memory.peak', '/sys/fs/cgroup/memory/memory.max_usage_in_bytes')),
+    oomKills: oomFromV2 !== undefined ? Number(oomFromV2) : oomFromV1 !== null ? Number(oomFromV1) : null,
+  };
 }
 
 /**
