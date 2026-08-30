@@ -13,9 +13,9 @@
 # For half the memory, uncomment the 720p block.
 
 services:
-  clipreel:
+  stitch:
     build: .
-    container_name: clipreel
+    container_name: stitch
     restart: unless-stopped
     # Dokploy writes the variables from its Environment tab into a .env beside this
     # file, so the same compose works locally and there.
@@ -61,7 +61,7 @@ services:
       # fixing in the first place.
       #
       # To use a host directory instead, swap the line below for `- ./data:/app/data`.
-      - clipreel-data:/app/data
+      - stitch-data:/app/data
 
     deploy:
       resources:
@@ -88,4 +88,4 @@ services:
         max-file: '3'
 
 volumes:
-  clipreel-data:
+  stitch-data:

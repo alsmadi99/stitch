@@ -223,7 +223,7 @@ export const config = {
     rawDir: path.join(dataDir, 'raw'),
     workDir: path.join(dataDir, 'work'),
     outDir: path.join(dataDir, 'out'),
-    dbFile: path.join(dataDir, 'clipreel.db'),
+    dbFile: path.join(dataDir, 'stitch.db'),
   },
   http: {
     port: env.HTTP_PORT,
@@ -231,6 +231,16 @@ export const config = {
   logLevel: env.LOG_LEVEL,
   cleanupSources: env.CLEANUP_SOURCES,
 } as const;
+
+// The project was called clipreel before it was called stitch. An existing deployment
+// has its whole history — dedupe fingerprints, episode numbering, the backfill cursor —
+// in the old file, and silently starting a fresh database would re-upload everything.
+const legacyDb = path.join(dataDir, 'clipreel.db');
+if (fs.existsSync(legacyDb) && !fs.existsSync(config.paths.dbFile)) {
+  for (const suffix of ['', '-wal', '-shm']) {
+    if (fs.existsSync(legacyDb + suffix)) fs.renameSync(legacyDb + suffix, config.paths.dbFile + suffix);
+  }
+}
 
 // Every subsystem assumes these exist; create them once, here, rather than in whichever
 // module happens to run first.

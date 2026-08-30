@@ -1,769 +1,350 @@
-# clipreel
+<p align="center">
+  <img src="assets/logo.svg" alt="Stitch" width="132" height="132">
+</p>
 
-Discord bot that watches a clips channel, keeps only the unique clips, and compiles
-them into a single video with crossfades that it uploads to YouTube — weekly, or as
-soon as the queue hits 20 clips.
+<h1 align="center">Stitch</h1>
+
+<p align="center">
+  A Discord bot that collects your community's gaming clips, throws away the duplicates,
+  and sews the rest into one video on YouTube — weekly, or whenever twenty pile up.
+</p>
+
+<p align="center">
+  <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A520.11-3B6FE0">
+  <img alt="TypeScript" src="https://img.shields.io/badge/typescript-strict-5BC8F5">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-0E1533">
+</p>
+
+---
+
+## Why "Stitch"?
+
+Because that is literally the job. Twenty ragged little clips go in; one seamless reel
+comes out. Every crossfade is a stitch, the reel is the quilt, and `ffmpeg` is the
+sewing machine that does the actual needlework at three in the morning while you sleep.
+
+We considered calling it Quilt. Nobody wants to tell their friends about a Discord bot
+called Quilt.
+
+It also fits the temperament. The bot takes a pile of chaotic, badly-behaved little
+monsters that have nothing in common — different resolutions, different frame rates,
+one of them has no audio at all, one of them is somehow 4:3 — and patiently makes them
+into a family. Nothing gets left in the queue.
+
+Any resemblance to a small blue alien is a coincidence, and the mascot above is his own
+creature: he is made of film strips and held together by his own seam, which is more
+than most of us can say.
+
+---
+
+## What it does
 
 ```
-#gaming-clips ──▶ ingest ──▶ dedupe ──▶ SQLite queue
-                                             │
+#gaming-clips ──▶ ingest ──▶ dedupe ──▶ queue
+                                          │
                         20 clips  or  weekly cron
-                                             ▼
-                          ffmpeg normalize ──▶ xfade stitch
-                                             ▼
-                       YouTube upload (private) ──▶ link posted to Discord
+                                          ▼
+                        normalize ──▶ stitch with crossfades
+                                          ▼
+                    YouTube (private) ──▶ link posted back to Discord
 ```
 
-## Requirements
+- **Watches a channel** for uploaded videos and links to clip hosts. Images, screenshots
+  and chatter are filtered out before anything is downloaded.
+- **Refuses duplicates** three different ways, including a perceptual fingerprint that
+  catches the same clip re-uploaded through a different capture tool.
+- **Normalizes everything** to one resolution, frame rate and loudness, so twenty
+  mismatched sources cut together cleanly.
+- **Uploads to YouTube** with a generated thumbnail, title and description — private by
+  default, because publishing should be a decision.
+- **Runs on a small box.** Peak memory is a tuning knob, not a surprise.
 
-- Node 20.11+
-- ffmpeg — bundled via `ffmpeg-static`, nothing to install
-- `yt-dlp` on `PATH` — **optional**, only needed for link clips (Medal, Streamable,
-  Twitch, YouTube). Without it those are skipped and uploaded attachments still work.
+---
 
-## Setup
+## Quick start
 
 ```bash
+git clone https://github.com/YOUR_USER/stitch.git
+cd stitch
 npm install
 cp .env.example .env
 ```
 
-### Discord
-
-1. Create an application at <https://discord.com/developers/applications>, add a bot,
-   copy the token into `DISCORD_TOKEN` and the application ID into `DISCORD_APP_ID`.
-2. In **Bot → Privileged Gateway Intents**, enable **Message Content Intent**. Without
-   it attachments and links arrive empty and the bot collects nothing.
-3. Invite the bot with the `bot` and `applications.commands` scopes and the
-   *Read Messages*, *Read Message History*, *Send Messages*, and *Add Reactions*
-   permissions.
-4. Put the clips channel ID in `CLIPS_CHANNEL_ID` (right-click the channel → Copy ID,
-   with Developer Mode on) and your guild ID in `DISCORD_GUILD_ID` so slash commands
-   register instantly instead of taking an hour to propagate globally.
-
-### YouTube
-
-1. In Google Cloud Console, enable **YouTube Data API v3**.
-2. Create an OAuth client of type **Web application** and add
-   `http://localhost:8787/oauth2callback` as an authorized redirect URI.
-3. While the app is in *Testing*, add your Google account under **Test users**.
-4. Fill in `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET`, then run:
-
-```bash
-npm run youtube:auth
-```
-
-Open the printed URL, grant access, and copy the resulting `YOUTUBE_REFRESH_TOKEN`
-into `.env`.
-
-Leave the YouTube variables blank to run in local-only mode — reels are compiled to
-`data/out/` and announced in Discord without being uploaded.
-
-## Running
-
-```bash
-npm run dev
-```
-
-```bash
-npm run build
-npm start
-```
-
-Check every integration point before the first real run:
+Fill in `DISCORD_TOKEN`, `DISCORD_APP_ID`, `CLIPS_CHANNEL_ID` and `ADMIN_USER_IDS`, then:
 
 ```bash
 npm run doctor
 ```
 
-It verifies the env file, the ffmpeg binaries, yt-dlp, the database, the Discord login
-and channel permissions, the Message Content intent, and the YouTube token — without
-posting, uploading, or changing anything.
-
-Useful one-offs:
+`doctor` checks every integration point — env file, ffmpeg, yt-dlp, database, Discord
+login, channel permissions, the privileged intent, and the YouTube token — and changes
+nothing. Fix whatever it reports, then:
 
 ```bash
-npm run reel:now
+npm run dev
 ```
 
-## Backfilling the whole channel
+Leave the YouTube variables blank to run in local-only mode: reels are compiled to
+`data/out/` and nothing is uploaded. It is the best way to see what the output looks
+like before pointing it at a real channel.
 
-Walks the channel from its very first message, ingests every video in it, and uploads
-them as reels of at most `REEL_MAX_CLIPS` — the same 20-clip format as a normal week.
+### Discord setup
+
+1. Create an application, add a bot, copy the token and application ID.
+2. **Bot → Privileged Gateway Intents → enable Message Content Intent.** Without it,
+   attachments arrive empty and the bot silently collects nothing.
+3. Invite it with the `bot` and `applications.commands` scopes and these permissions:
+   View Channel, Send Messages, Embed Links, Read Message History, Add Reactions.
+4. Turn on Developer Mode in Discord, then right-click the channel and your own name to
+   copy the IDs for `CLIPS_CHANNEL_ID` and `ADMIN_USER_IDS`.
+
+### YouTube setup
+
+1. Enable **YouTube Data API v3** in a Google Cloud project. It is free and needs no
+   billing account.
+2. Create an OAuth client of type **Web application** with
+   `http://localhost:8787/oauth2callback` as an authorized redirect URI.
+3. Set the app's publishing status to **In production**. Left in *Testing*, Google
+   invalidates the refresh token every seven days.
+4. Fill in `YOUTUBE_CLIENT_ID` and `YOUTUBE_CLIENT_SECRET`, then run
+   `npm run youtube:auth` and paste the printed token into `.env`.
+
+Run that consent flow on your laptop. The bot authenticates with the refresh token and
+never receives a redirect, so the redirect URI does not change when you deploy.
+
+---
+
+## Commands
+
+| Command | Who | What |
+| --- | --- | --- |
+| `/clips status` | `ADMIN_ROLE_IDS` | Queue size, whether a reel is compiling, last reel |
+| `/reel build` | `ADMIN_USER_IDS` | Compile now, ignoring the threshold |
+| `/reel publish` | `ADMIN_USER_IDS` | Attempt to make the latest reel public |
 
 ```bash
-npm run backfill
+npm run backfill          # walk the entire channel history and reel it all
+npm run backfill:status   # check on it from anywhere
+npm run doctor            # verify every integration point
+npm run reel:now          # compile and upload immediately
+npm run youtube:cleanup   # delete videos this bot uploaded
 ```
 
-**The work runs inside the bot, not in your terminal.** The command files a request, the
-bot picks it up within a few seconds, and your shell just follows along — so closing the
-terminal is safe, the output goes to the container log with everything else, and
-`/health` reports live progress. Ctrl+C stops watching; it does not stop the job.
+**Backfill is deliberately not a Discord command.** It walks the whole channel,
+downloads gigabytes and uploads several videos against a quota that allows six a day.
+One mistaken invocation costs a day of uploads and cannot be recalled.
 
-That is deliberate: a full history walk runs for hours, and a job living in an
-interactive shell dies the moment the pty closes.
+### Vetoing a clip
 
-Check on it at any time, from anywhere:
+React with ❌ on any clip and it leaves the queue — it will not appear in this reel or
+any later one. The bot swaps its ✅ for 🚫 so the state is visible in the channel.
+Remove the reaction to put it back.
 
-```bash
-npm run backfill:status
-```
-
-```bash
-curl -s https://your-domain/health
-```
-
-Only one backfill can be queued or running at a time; a second request is refused
-rather than starting a competing scan. If the container restarts mid-job the job is
-marked `interrupted` on the next boot — re-run the command and the cursor continues
-from where it stopped.
-
-Images, screenshots, links to image hosts, and plain text are filtered out before
-anything is downloaded, so a chatty channel costs nothing but the history scan.
-
-The reel is built as soon as the queue is deep enough, not after the whole scan. That
-is what keeps disk flat: roughly 20 clips are on disk at any moment rather than the
-channel's entire video history. With `CLEANUP_SOURCES=true` each batch's sources are
-deleted once its reel is uploaded.
-
-Position is checkpointed after every page and before every compile, so the run is safe
-to stop, restart, or redeploy mid-way — it resumes instead of re-downloading.
-
-Re-read the channel from its first message while keeping the database — already-seen
-clips are skipped, so this costs API calls and nothing else:
-
-```bash
-npm run backfill -- --rescan
-```
-
-Start completely over. **Destructive**: wipes the clip queue, the reel history, the
-cursor, and every downloaded and generated file, then walks the channel from scratch:
-
-```bash
-npm run backfill -- --restart
-```
-
-It prints what it is about to delete and waits 8 seconds first; `--force` skips the
-wait. The one thing it cannot undo is YouTube — videos already uploaded stay up, and
-because the record of what was published is part of what gets deleted, a backfill after
-a reset **will upload those clips again**. Episode numbering restarts at #1.
-
-```bash
-npm run backfill -- --limit 500 --reels 2
-```
-
-```bash
-npm run backfill -- --scan-only
-```
-
-`/clips backfill` does the same thing from Discord. It replies immediately and keeps
-running in the background, because a full history walk outlives the 15-minute
-interaction token; watch it with `/clips status`.
-
-### Why a large history takes more than one day
-
-YouTube allows 10,000 quota units a day and charges 1,600 per upload. **Six uploads a
-day is a hard ceiling** — the seventh fails with `quotaExceeded` no matter how the bot
-is configured. A 200-clip history is ten reels, so it takes two days at minimum. No
-setting changes that.
-
-What the bot does about it is keep going anyway, without needing you:
-
-1. It builds reels past the quota and keeps them on disk as `pending_upload`.
-2. The hourly retry sweep uploads them as quota frees up.
-3. When the backlog drains, the scan **resumes itself** and carries on.
-
-So one `npm run backfill` eventually publishes the whole channel. There is nothing to
-re-run.
-
-Two dials bound it:
-
-| Variable                 | Default | Purpose                                              |
-| ------------------------ | ------- | ---------------------------------------------------- |
-| `BACKFILL_MAX_REELS`     | `0`     | Hard cap per run. 0 = unlimited                       |
-| `MAX_PENDING_UPLOADS`    | `3`     | Built-but-unuploaded reels allowed to pile up         |
-| `BACKFILL_AUTO_CONTINUE` | `true`  | Resume the scan once uploads drain                    |
-
-`MAX_PENDING_UPLOADS` is really a disk dial: each finished reel waiting on quota sits in
-`data/out/` until it goes up. Raising it builds further ahead at the cost of disk;
-lowering it keeps disk flat and simply pauses the scan more often.
-
-A run that stops for quota reports `stoppedBy: pendingCap` and is picked up again
-automatically. Only `complete` and `error` are left alone.
-
-## Slash commands
-
-| Command         | Who                | What it does                                    |
-| --------------- | ------------------ | ----------------------------------------------- |
-| `/clips status` | `ADMIN_ROLE_IDS`   | Queue size, whether a reel is compiling, last reel |
-| `/reel build`   | `ADMIN_USER_IDS`   | Compiles now, ignoring the threshold            |
-| `/reel publish` | `ADMIN_USER_IDS`   | Attempts to flip the latest uploaded reel public |
-
-**Backfill is not a Discord command.** It walks the whole channel, downloads gigabytes,
-and uploads several videos against a quota that allows six a day. One mistaken
-invocation costs a day of uploads and cannot be recalled, so it lives in
-`scripts/backfill.ts` and runs from the server only.
-
-`/reel build` and `/reel publish` spend upload quota, so they are gated on
-`ADMIN_USER_IDS` — a list of Discord **user** IDs, not roles. Leave it blank and those
-commands are **not registered at all**; there is no permission fallback, because there
-is no safe default answer to who may publish to your channel. The handler re-checks the
-allowlist on every invocation, so a registration left over from an earlier config
-cannot become an open door.
-
-`/clips status` is read-only and uses `ADMIN_ROLE_IDS`, falling back to **Manage
-Server** when that is unset.
-
-When a reel is uploaded the bot posts the YouTube link on its own — no embed, no
-buttons, no call to action. Discord unfurls the link into a player card itself.
-
-The bot reacts to each clip message: ✅ queued, ♻️ duplicate, ⚠️ rejected.
-
-## Vetoing a clip
-
-React with ❌ (`REJECT_REACTION`) on a clip in the channel and it is pulled out of the
-queue — it will not appear in the next reel or any later one. The bot swaps its ✅ for
-🚫 so the state is visible in the channel. Remove the reaction to put it back.
-
-`VETO_ALLOWED` decides who it listens to. `ADMIN_USER_IDS` always works; the setting
-only widens the circle beyond it, and everyone else is ignored and logged.
+`VETO_ALLOWED` decides who it obeys. `ADMIN_USER_IDS` always works; the setting only
+widens the circle.
 
 | `VETO_ALLOWED` | you | a mod with Manage Server | the clip's author | anyone else |
-| -------------- | --- | ------------------------ | ----------------- | ----------- |
-| `owner` (default) | yes | no                    | no                | no          |
-| `admins`       | yes | yes                      | no                | no          |
-| `authors`      | yes | yes                      | yes               | no          |
-
-With `ADMIN_ROLE_IDS` set, that column becomes "a member holding one of those roles"
-instead of Manage Server.
-
-The author case only applies when every clip on the message is theirs — a post carrying
-several clips cannot be half withdrawn.
+| --- | --- | --- | --- | --- |
+| `owner` (default) | yes | no | no | no |
+| `admins` | yes | yes | no | no |
+| `authors` | yes | yes | yes | no |
 
 A reaction is not a permission check in itself — anyone who can see the channel can add
-one — so the bot decides who it obeys and ignores the rest. The default is the
-restrictive end: only the accounts named in `ADMIN_USER_IDS`. Widening it is a
-deliberate opt-in, and worth considering, since a veto publishes nothing, spends no
-quota, and is undone by removing the reaction.
+one — so the bot decides who it listens to and ignores the rest.
 
-A veto is its own clip status rather than reusing `rejected`, which means "ingest
-failed". That distinction is what makes it stick: when a reel fails, its clips are
-returned to the queue by moving rows out of `used` — and a vetoed clip is no longer
-`used`, so it is never picked back up. Verified: veto a clip inside a building reel,
-fail the reel, and every other clip returns while the vetoed one stays excluded.
+---
 
-The source file is deliberately kept rather than deleted, which is what makes removing
-the reaction able to restore it. Vetoes are rare and manual, so the disk cost is noise.
+## How it works
 
-If the reel has already been uploaded the clip is in a published video and no database
-change can take it out; the veto is still recorded so the clip never enters a future
-reel, and the log says so.
+### Three layers of duplicate detection
 
-Vetoing works on backfilled clips too — reactions on messages posted long before the
-bot started arrive uncached, which is why the client enables the Reaction partial.
+1. **Message identity.** A `UNIQUE (message_id, source_url)` constraint, so restarts and
+   overlapping backfills never re-ingest the same post.
+2. **SHA-256 of the bytes.** Catches the same file reposted verbatim.
+3. **Perceptual fingerprint.** Five frames sampled at 10/30/50/70/90% of the clip, each
+   reduced to a 64-bit dHash. Two clips match when their mean Hamming distance is under
+   `PHASH_THRESHOLD` (default 8).
 
-## Restarts and redeploys
+Layer 3 is the one that earns its keep: it catches a clip re-uploaded through Medal, or
+trimmed and recompressed by a different capture tool. Measured on synthetic footage, a
+clip rescaled to half resolution at CRF 34 scored **0.8** against its original while
+unrelated footage scored **22–38** — a wide margin either side of the threshold.
 
-Clips are marked `used` before compiling begins, and compiling takes minutes. If the
-process dies in that window — a redeploy, an OOM kill, a host reboot — the failure
-handler never runs, and without recovery those clips would stay attached to a reel
-stuck in `building`: silently excluded from every future reel.
+### Timing, and why it is fussy about it
 
-So on every startup the bot releases the clips of any reel left in `building` or
-`uploading`, marks that reel failed, and deletes the normalize/stitch intermediates a
-killed run left in `data/work/`. Nothing is lost and no disk leaks. A failed reel does
-not consume an episode number either, so numbering stays contiguous.
-
-What actually happens if you deploy mid-run:
-
-| Interrupted during | Result                                                        |
-| ------------------ | -------------------------------------------------------------- |
-| Compiling          | Clips return to the queue on restart; the next reel includes them |
-| Uploading          | Same. The abandoned resumable session expires on YouTube's side  |
-| Backfill           | The process ends. Re-run it — the cursor resumes where it stopped |
-
-A backfill is a one-off command, not a service, so it does **not** restart itself after
-a redeploy. Re-run the same command; already-scanned messages are skipped and
-already-downloaded clips are still queued.
-
-A backfill runs inside the bot process, so a closed terminal cannot kill it. A
-*container* restart does end it — but the next boot marks it `interrupted` and
-automatically re-queues it, continuing from the cursor. A deploy mid-backfill therefore
-costs the current reel's compile and nothing else.
-
-Auto-resume is capped at three consecutive restarts, so a crash loop surfaces instead of
-retrying forever, and a resumed job **never repeats a `--restart`** — re-running the
-reset on every boot would erase the very progress the resume exists to preserve.
-
-Shutdown is deliberately immediate rather than waiting for the current compile: the
-stop grace period is seconds and a compile is minutes, so waiting only delays the
-inevitable kill. The log says plainly when it happens.
-
-## How deduplication works
-
-Three layers, cheapest first:
-
-1. **Message identity** — a `UNIQUE (message_id, source_url)` constraint, so restarts
-   and overlapping backfills never re-ingest the same post.
-2. **SHA-256 of the file bytes** — catches the same file reposted verbatim.
-3. **Perceptual fingerprint** — five frames sampled at 10/30/50/70/90% of the clip,
-   each reduced to a 64-bit dHash. Two clips are the same when their mean Hamming
-   distance is under `PHASH_THRESHOLD` (default 8) and their durations are within a
-   generous window (±25%, minimum ±3s). The window is only a prefilter to bound how
-   many comparisons run — the threshold is what decides a match — so it is deliberately
-   loose. A tight window let the same clip through twice when a different capture tool
-   had trimmed it a second or two differently.
-
-   A clip re-posted with *drastically* different trimming can still slip past, because
-   the sample points are proportional and land on different content.
-
-Layer 3 is the one that matters in practice: it catches a clip re-uploaded through
-Medal, or trimmed and recompressed by a different capture tool. Measured on
-synthetic footage, a clip rescaled to half resolution at CRF 34 scored 0.8 against
-its original while unrelated footage scored 22–38, so the default threshold has a
-wide margin on both sides.
-
-## How the video is built
-
-Each clip is re-encoded to a common format first, because `xfade` refuses to join
-inputs that differ in resolution, frame rate, or pixel format:
-
-- letterboxed into `OUTPUT_WIDTH`×`OUTPUT_HEIGHT` (never stretched), `OUTPUT_FPS`,
-  yuv420p, SAR 1:1
-- stereo 48 kHz AAC, passed through `loudnorm` so one screaming clip does not blow
-  out the mix; clips with no audio get a synthesized silent track
-- trimmed to `MAX_CLIP_SECONDS`
-- optionally, the contributor's name burned into the first `TITLE_CARD_SECONDS`. Off
-  by default (`TITLE_CARDS=false`); when on, the name is passed to `drawtext` through a
-  text file so punctuation in display names cannot break the filtergraph
-
-Then one `ffmpeg` invocation chains `xfade` (video) and `acrossfade` (audio) across
-every clip. Joining N clips of total length `D` with transition `T` yields
-`D - (N-1)*T` seconds, and the k-th join sits at `sum(durations[0..k-1]) - k*T`.
-Normalized durations are re-measured with ffprobe before computing those offsets,
-because `loudnorm` and frame-rate conversion shift lengths by a few frames.
-
-If any clip is shorter than twice the transition, the transition is shortened for the
-whole reel rather than swallowing that clip.
-
-## Thumbnail
-
-Every episode gets a generated 1280x720 thumbnail with the same furniture, so the
-playlist reads as a series: an accent badge with `#N` top-right, an accent rule, and a
-darkened band carrying `THUMBNAIL_LABEL` across the bottom.
-
-The background is not a fixed-offset frame grab — that reliably lands on a loading
-screen, a crossfade, or a dark corner. 24 frames are sampled across the finished reel,
-scored on colourfulness, contrast, and distance from a mid-tone exposure, and the
-winner is used. Output is around 60KB, far under YouTube's 2MB thumbnail limit.
-
-Custom thumbnails require a verified channel. If YouTube rejects it the upload still
-succeeds — the failure is logged and skipped, not fatal.
-
-## Description and tags
-
-The description is generic and identical in shape for every episode: one line naming
-the series and episode number, the games covered, and a hashtag block. No per-clip
-breakdown, no contributor list. `YOUTUBE_GAMES` sets the game list;
-`YOUTUBE_DESCRIPTION` replaces the whole body if you would rather write your own.
-
-Two limits are enforced in code rather than left to fail silently:
-
-- **Hashtags** are truncated to 15. Past 15, YouTube ignores *every* hashtag on the
-  video, not just the excess.
-- **Tags** are added until the combined 500-character budget runs out, then the rest
-  are dropped with a warning.
-
-## When an upload fails
-
-A failed upload does not throw the video away. Compiling twenty clips takes tens of
-minutes of CPU; a quota error says nothing about the video, only about the transport,
-so re-encoding it would be pure waste.
-
-Instead the reel is kept on disk with status `pending_upload`, its clips stay attached
-to it, and the upload is retried on a schedule. Every hour the bot sweeps for reels
-whose backoff has elapsed, and it sweeps once more at startup — so a reel deferred
-overnight by a quota exhaustion goes out on its own the next morning, with no command
-to run.
-
-| Failure                                     | Retried | Backoff                          |
-| ------------------------------------------- | ------- | -------------------------------- |
-| `quotaExceeded`, `dailyLimitExceeded`        | yes     | 6 hours (quota resets daily)     |
-| 5xx, `ECONNRESET`, timeouts, dropped sockets | yes     | 5 min, doubling, capped at 2 h   |
-| 403, 401, 400 — rejected metadata or auth    | no      | fails immediately                |
-
-The distinction matters: a permanently rejected video fails identically forever, so
-retrying it only burns quota.
-
-After 12 failed attempts — three days at the quota backoff, well past any daily reset
-or outage that was going to resolve itself — the reel is abandoned: its clips return to
-the queue, the video is deleted, and the failure is announced in Discord.
-
-An interrupted upload is treated the same way. A container restart mid-upload leaves a
-finished video on disk, so it rejoins the retry queue rather than being rebuilt.
-
-A backfill stops as soon as one reel defers. Compiling more would only queue more
-videos behind the same quota wall, and they upload themselves once it resets — so
-there is nothing to re-run for.
-
-`/clips status` and `/health` both report how many reels are waiting to upload.
-
-## Clip timing
-
-Every timing decision is taken from the source's **video stream**, never the container.
-A container reports the longest stream, and screen recorders routinely emit audio that
-runs past the picture — timing a reel off that number asks ffmpeg for frames that do not
-exist, and it fills the gap by freezing the last one. A 5.0s video with a 5.8s audio
+Every timing decision comes from the source's **video stream**, never the container. A
+container reports its longest stream, and screen recorders routinely emit audio that
+runs past the picture. Timing a reel off that number asks ffmpeg for frames that do not
+exist, and it fills the gap by freezing the last one — a 5.0s video with a 5.8s audio
 track produced an 800ms stall at the end of that clip.
 
-Targets are floored to whole frames rather than rounded, so they are always reachable,
-with `tpad` as a safety net for decode variance.
+Each normalized clip is then pinned to one frame-aligned duration on **both** streams,
+because video lands on frame boundaries while audio lands on AAC boundaries that
+`loudnorm` has also lengthened.
 
-Verified by compiling a reel where half the sources have audio longer than video, then
-scanning the result with `freezedetect`: zero frozen segments, total duration within
-34ms of prediction, streams within 10ms of each other.
+Stitching places audio explicitly rather than using `acrossfade`. Chained across a
+batch, `acrossfade` builds an audio timeline roughly 1024 samples (~21ms at 48kHz)
+shorter per join than `xfade` builds for video — so sound slides further ahead of
+picture at every single join. Instead, each segment's audio is delayed to the exact
+offset its video uses and summed with `amix`, which makes the two agree by construction.
 
-## Audio/video sync
-
-Every normalized clip is pinned to one frame-aligned duration on **both** streams
-(`trim` on video, `apad` + `atrim` on audio). Left to themselves, video lands on a
-30fps boundary while audio lands on an AAC frame boundary that `loudnorm` has also
-lengthened, leaving each clip with audio tens of milliseconds longer than its picture.
-
-Stitching then places audio explicitly rather than using `acrossfade`. Chained across a
-batch, `acrossfade` builds an audio timeline roughly 1024 samples (~21 ms at 48 kHz)
-shorter per join than the video timeline `xfade` builds from the same durations — so
-every join slides sound a little further ahead of picture. Instead each segment's audio
-is delayed to the exact offset its video uses, faded, and summed with `amix`, which
-makes the two agree by construction.
-
-Measured on twelve clips carrying a white flash and a 1 kHz beep at the same instant,
-comparing `blackdetect` against `silencedetect` in the finished reel:
+Measured with clips carrying a white flash and a 1kHz beep at the same instant, then
+compared with `blackdetect` against `silencedetect`:
 
 | | first marker | last marker | worst |
 | --- | --- | --- | --- |
-| `acrossfade` (before) | +3 ms | −321 ms | **−323 ms**, growing every join |
-| explicit timeline (after) | +3 ms | −44 ms | **−44 ms**, not accumulating |
+| `acrossfade` | +3ms | −321ms | **−323ms**, growing every join |
+| explicit timeline | +3ms | −44ms | **−44ms**, not accumulating |
 
-The remaining offset is bounded rather than progressive, which is the part that
-matters: it does not get worse as a reel gets longer.
+The residual is bounded rather than progressive, which is the part that matters: it does
+not get worse as a reel gets longer.
 
-## Replacing a bad upload
+### Memory is a dial
 
-YouTube cannot swap the file behind an existing video — an upload is bound to its id
-permanently, and the Data API has no replace call. A corrected reel is always a new
-link, so a bad batch has to be deleted and rebuilt.
+The stitch step dominates everything else. Measured peak RSS for one ffmpeg call:
 
-```bash
-npm run youtube:cleanup
-```
+| Inputs held open | 1080p | 720p |
+| --- | --- | --- |
+| 3 | 1030 MB | 495 MB |
+| 4 | 1200 MB | 615 MB |
+| 5 | 1450 MB | 705 MB |
 
-Lists what it would delete and stops. Add `--yes` to actually delete, `--keep N` to
-spare the newest N reels.
+Each extra input costs roughly 215 MB at 1080p, because every one keeps its own decoder
+and frame buffers alive for the whole call. Joining 20 clips in a single invocation
+would need about **4.5 GB** and get OOM-killed on an 8 GB host.
 
-**Run it before `backfill --restart`.** The reset wipes the reel table, and those rows
-are the only record of which video ids belong to the bot; afterwards the old uploads
-can only be removed by hand in YouTube Studio.
+So clips are folded `STITCH_BATCH` at a time into a tree: 20 clips at batch 4 become 5
+segments, then 2, then 1. Peak memory is set by the batch size instead of the reel
+length, at the cost of one extra encode pass per level. Intermediate levels encode fast
+and at high quality, so the extra passes cost time rather than fidelity.
 
-Deleting costs 50 quota units per video against the 10,000 daily budget — trivial next
-to the 1,600 an upload costs.
+Dropping to 720p roughly halves both memory and encode time, and is the single biggest
+lever if compiles feel slow.
 
-## Monetization
+### The thumbnail
 
-It cannot be turned on through the YouTube Data API — there is no field for it on a
-regular channel's videos. It is a channel-level setting:
+Every episode gets a generated 1280x720 thumbnail with the same furniture, so the
+playlist reads as a series: an accent badge with `#N`, an accent rule, and a darkened
+band carrying `THUMBNAIL_LABEL`.
 
-1. The channel has to be in the YouTube Partner Program.
-2. Once it is, set **YouTube Studio → Settings → Upload defaults → Monetization** to
-   ads-on, and every API upload inherits it.
+The background is not a fixed-offset frame grab — that reliably lands on a loading
+screen or a dark corner. Twenty-four frames are sampled across the finished reel, scored
+on colourfulness, contrast and distance from a mid-tone exposure, and the winner wins.
 
-Two things the bot does control, both of which quietly kill monetization if wrong:
+---
 
-- `selfDeclaredMadeForKids` is set to `false` on every upload. Made-for-kids videos get
-  no personalized ads.
-- If the *channel* is flagged made-for-kids, nothing overrides that. `npm run doctor`
-  warns when it sees this.
-
-## Gotchas worth knowing
-
-- **`YOUTUBE_PRIVACY` only applies when `YOUTUBE_AUTO_PUBLISH=true`.** With
-  auto-publish off — the default — every upload is created private no matter what
-  `YOUTUBE_PRIVACY` says, and publishing is a separate deliberate act. The two settings
-  used to be independent, so `PRIVACY=public` with `AUTO_PUBLISH=false` read as safe and
-  published everything on upload. `npm run doctor` prints the effective privacy.
-- **Unverified Google Cloud projects can only upload private videos.** The API accepts
-  `privacyStatus: "public"` and locks the video as private anyway, and `/reel publish`
-  comes back 403 Forbidden. Until the project passes API verification, publishing is a
-  YouTube Studio action. The default `YOUTUBE_PRIVACY=private` matches this reality.
-- **Docker Compose parses `.env` more strictly than dotenv.** A stray line that is not
-  `KEY=value`, a comment, or blank makes `docker compose` refuse the whole file with
-  `key cannot contain a space`. Keep escape sequences out of comments.
-- **`#` in a .env value starts a comment.** dotenv drops everything after an unquoted
-  `#`, so `YOUTUBE_TITLE_TEMPLATE=... #{n} ...` silently loses the episode number and
-  `THUMBNAIL_ACCENT=#E62117` becomes empty. Wrap values containing `#` in double
-  quotes, or use `0xRRGGBB` for colours. `npm run doctor` prints the resolved title so
-  you can see it happen.
-- **Videos over 15 minutes need a verified channel.** 20 clips at the 60s cap is a
-  20-minute reel. `npm run doctor` checks `longUploadsStatus` and fails if your
-  threshold and clip cap can exceed the limit.
-- **A Google app left in "Testing" invalidates its refresh token every 7 days.** The
-  bot then fails every upload until you re-run `npm run youtube:auth`. Set the app's
-  publishing status to **In production** on the Google Auth Platform screen — that is
-  allowed without verification, it just shows an "unverified app" warning during
-  consent and caps you at 100 users.
-- **Quota.** One upload costs 1600 of the default 10,000 units/day. Weekly reels are
-  nowhere near the ceiling; hammering `/reel build` is.
-- **Discord CDN links expire.** Attachment URLs are signed and short-lived, which is
-  why clips are downloaded the moment the message arrives, and why backfill re-fetches
-  messages through the API instead of trusting stored URLs.
-- **Copyright.** Clips with game soundtracks or streamer audio can pick up Content ID
-  claims. That is a channel-policy problem, not something the bot can detect.
-- **Consent.** The bot reposts members' clips to a public channel under their display
-  name. Say so in the channel topic.
-- One compile runs at a time. A threshold trigger firing mid-run is skipped, not
-  queued; the clips stay in the queue for the next run.
-- If a run fails at any stage its clips are returned to the queue, so a bad upload
-  never costs you a week of submissions.
-
-## Troubleshooting
-
-**`doctor` says the account has no YouTube channel.** `channels.list({ mine: true })`
-came back empty, which means one of two things:
-
-- The Google account has never created a channel. A Google account and a YouTube
-  channel are separate things — signing in to YouTube does not create one. Open
-  <https://youtube.com>, signed in as the account `doctor` names, and create a channel.
-- The channel exists but belongs to a **Brand Account**, and consent was granted to the
-  personal account instead. `npm run youtube:auth` shows a channel picker after the
-  account picker; choosing the personal account yields a valid token with no channel
-  behind it. Revoke at <https://myaccount.google.com/permissions>, re-run
-  `npm run youtube:auth`, and pick the channel.
-
-The account `doctor` prints comes from the `userinfo.email` scope. Tokens minted before
-that scope was added still work; they just report the account as unknown.
-
-**`invalid_grant` on upload after about a week.** The Google app is still in *Testing*
-— see the publishing-status gotcha above.
-
-## Resource use
-
-The stitch step dominates everything else. Measured peak RSS for one ffmpeg call, by
-resolution and number of inputs held open at once:
-
-| Inputs | 1080p   | 720p   |
-| ------ | ------- | ------ |
-| 3      | 1030 MB | 495 MB |
-| 4      | 1200 MB | 615 MB |
-| 5      | 1450 MB | 705 MB |
-
-Each extra input costs roughly 215 MB at 1080p, because every one keeps its own
-decoder and frame buffers alive for the whole call. Joining 20 clips in a single
-invocation would need about 4.5 GB and get OOM-killed on an 8 GB host.
-
-The trade is time: each tree level is another full encode pass over the reel. Measured
-on 120 s of 1080p30 footage with `FFMPEG_THREADS=2`, intermediates at `ultrafast`:
-
-| Config                    | Passes | Time  | vs realtime |
-| ------------------------- | ------ | ----- | ----------- |
-| `STITCH_BATCH=3`, 1080p   | 4      | 46 s  | 0.38x       |
-| `STITCH_BATCH=5`, 1080p   | 3      | 44 s  | 0.37x       |
-| single pass, 1080p        | 2      | 31 s  | 0.26x       |
-| `STITCH_BATCH=5`, 720p    | 3      | 26 s  | 0.21x       |
-
-Batch size barely matters now that intermediates encode at `ultrafast` — they are
-deleted immediately, so they are tuned for speed rather than size. **Resolution is the
-real lever**: 720p is close to twice as fast and uses half the memory. `MAX_CLIP_SECONDS`
-is the other one, since it caps how much footage a reel contains at all.
-
-These numbers are from a machine with cores to spare. On a container limited to
-`cpus: 2.0`, decoding, filtering and encoding all contend for the same two cores, so
-expect roughly double.
-
-So clips are folded `STITCH_BATCH` at a time into a tree: 20 clips at batch 4 become
-5 segments, then 2, then 1. Peak memory is set by the batch size instead of the reel
-length, at the cost of one extra encode pass per level. Intermediate levels encode at
-CRF 16 rather than `X264_CRF`, so three or four compounding passes do not visibly
-soften the final video.
-
-Other limits worth knowing:
-
-- `FFMPEG_THREADS` caps ffmpeg's threading. It barely affects memory (about 4%) but it
-  is what stops encoding from saturating every core.
-- `INGEST_CONCURRENCY` bounds simultaneous downloads. 1 on a small host.
-- `MIN_FREE_DISK_MB` refuses to start a download when the volume is nearly full,
-  rather than filling the disk and taking the host down with it.
-- `MAX_DOWNLOAD_BYTES` defaults to 200 MB per clip.
-
-Dropping to 720p (`OUTPUT_WIDTH=1280`, `OUTPUT_HEIGHT=720`) roughly halves both peak
-memory and encode time.
-
-## What this costs
-
-Nothing. The YouTube Data API v3 is free and does not require a billing account on the
-Google Cloud project — leave billing off and it stays off.
-
-The only limit is quota, and quota is not purchasable. Every project gets 10,000 units
-a day:
-
-| Call                          | Units |
-| ----------------------------- | ----- |
-| `videos.insert` (one upload)  | 1600  |
-| `thumbnails.set`              | 50    |
-| `videos.update` (publish)     | 50    |
-| `channels.list` (doctor)      | 1     |
-
-So six uploads a day is the ceiling, and a normal week — one reel, one thumbnail — uses
-about 1650 of the 10,000. Nowhere near it.
-
-If you exceed the quota, uploads fail with `quotaExceeded` until the daily reset; you
-are never charged. `BACKFILL_MAX_REELS` exists to stop a history drain before it gets
-there. More quota is requested through Google's audit form, not by paying.
-
-Keep the project free by enabling only *YouTube Data API v3*. Other Google Cloud APIs
-can be billable; this one is not.
-
-## Deploying with Docker
+## Deploying
 
 ```bash
 docker compose up -d --build
 ```
 
-`docker-compose.yml` is sized for a small host: a 1536 MB limit against a measured
-~1.2 GB peak at 1080p with `STITCH_BATCH=3`, 2 CPUs, and `cpu_shares` set low so a
-long encode yields to anything else on the box. A commented 720p block halves it.
+The image is Debian-based on purpose: `better-sqlite3` ships glibc prebuilds, and the
+distro `ffmpeg` has the `drawtext` filter that the static build lacks. It also installs
+`yt-dlp` and a font for the thumbnail text.
 
-The image is Debian-based rather than Alpine on purpose — `better-sqlite3` and
-`ffmpeg-static` both ship glibc binaries, and musl would mean compiling both from
-source. It also installs `fonts-dejavu-core` (drawtext needs a real TTF for the
-thumbnail) and the `yt-dlp` binary.
+`docker-compose.yml` is sized for a small host — a 1536 MB limit against a measured
+~1.2 GB peak, with `cpu_shares` set low so a long encode yields to everything else. A
+commented 720p block halves it.
 
-State lives in the named volume `clipreel-data`: the SQLite database, downloaded clips,
-and finished reels. **That volume is the only state — back it up.** Losing it means
-losing the dedupe history and the episode numbering.
+State lives in the `stitch-data` volume: the database, downloaded clips and finished
+reels. **That volume is the only state — back it up.**
 
 ```bash
-docker run --rm -v clipreel_clipreel-data:/data -v "$PWD:/backup" alpine tar czf /backup/clipreel-data.tar.gz -C /data .
+docker run --rm -v stitch_stitch-data:/data -v "$PWD:/backup" \
+  alpine tar czf /backup/stitch-data.tar.gz -C /data .
 ```
 
-A named volume rather than a host bind mount, because of file ownership. The container
-runs unprivileged as uid 1000, but a bind-mounted host directory arrives owned by root
-— the mount replaces whatever the image set — and the app dies at startup:
+A named volume rather than a bind mount, because the container runs unprivileged and a
+bind-mounted host directory arrives owned by root. The entrypoint handles that case too
+if you prefer a host directory.
 
-```
-Error: EACCES: permission denied, mkdir '/app/data/raw'
-```
+### Quota, and why a big history takes days
 
-Docker seeds a *named* volume from the image instead, ownership included, so there is
-nothing to fix. If you would rather use a host directory, swap the volume line for
-`- ./data:/app/data`; the entrypoint starts as root only long enough to take ownership
-of the data directory, then drops to uid 1000 before running the bot, so that works
-too. Set `APP_UID`/`APP_GID` if the host directory belongs to someone other than 1000.
+YouTube allows 10,000 quota units a day and charges 1,600 per upload. **Six uploads a
+day is a hard ceiling** — the seventh fails no matter how the bot is configured. A
+200-clip history is ten reels, so it takes two days minimum.
 
-If you already have data in a host `./data` from an earlier deploy and want to move to
-the named volume, copy it across before switching:
+The bot keeps going anyway without you: it builds ahead, holds finished reels as
+`pending_upload`, uploads them hourly as quota frees up, and resumes the scan by itself
+once the backlog drains. One `npm run backfill` eventually publishes the whole channel.
 
-```bash
-docker run --rm -v "$PWD/data:/from" -v clipreel_clipreel-data:/to alpine cp -a /from/. /to/
-```
+| Failure | Retried | Backoff |
+| --- | --- | --- |
+| `quotaExceeded`, `rateLimitExceeded` | yes | 6 hours |
+| 5xx, `ECONNRESET`, timeouts | yes | 5 min, doubling, capped at 2 h |
+| 403, 401, 400 | no | fails immediately |
 
-A healthcheck watches a heartbeat file that is only refreshed while the Discord
-gateway is connected, so a wedged websocket is restarted instead of sitting there
-looking alive.
+A rejected video fails identically forever, so retrying it only burns quota.
 
-### Dokploy
+---
 
-The bot is a worker, not a web app, but it serves `GET /health` on port 3000 so the
-platform has something to route and poll.
+## Gotchas worth knowing
 
-1. **Application → Create → Docker Compose**, pointed at this repository.
-2. **Environment** tab: paste the contents of your `.env` there. Dokploy writes it to a
-   `.env` beside the compose file, which is what `env_file:` picks up. Do not commit
-   `.env` to the repo — it is in `.gitignore` and `.dockerignore` for that reason, and
-   the image never contains it.
-3. **Domains** tab: add `bot.mohammadalsmadi.com` pointing at port **3000**, and delete
-   the `ports:` block from `docker-compose.yml` — Dokploy's proxy reaches the container
-   directly, so publishing on the host only risks a port conflict.
-4. Deploy. Then check `https://bot.mohammadalsmadi.com/health`.
+- **`YOUTUBE_PRIVACY` only applies when `YOUTUBE_AUTO_PUBLISH=true`.** With auto-publish
+  off — the default — every upload is created private regardless. The two used to be
+  independent, which made `PRIVACY=public` with `AUTO_PUBLISH=false` read as safe and
+  publish everything on upload.
+- **Unverified Google Cloud projects can only upload private videos.** The API accepts
+  `public` and locks the video private anyway, and `/reel publish` returns 403.
+- **YouTube cannot replace a video's file.** A corrected reel is always a new link, so a
+  bad batch has to be deleted with `npm run youtube:cleanup` and rebuilt. Run that
+  *before* `backfill --restart`, which wipes the record of which videos are the bot's.
+- **`#` in a `.env` value starts a comment.** dotenv drops everything after an unquoted
+  `#`, so wrap values containing one in double quotes.
+- **Videos over 15 minutes need a verified channel.** Twenty clips at the 60s cap is a
+  20-minute reel. `doctor` checks this.
+- **Monetization cannot be enabled through the API.** It is a channel-level setting in
+  YouTube Studio; the bot only ensures `selfDeclaredMadeForKids` is false.
+- **Copyright.** Clips with game soundtracks can pick up Content ID claims. That is a
+  channel-policy problem, not something the bot can detect.
+- **Consent.** The bot reposts members' clips publicly. Say so in the channel topic.
 
-`/health` returns 200 while the Discord gateway is connected and 503 when it is not, so
-it doubles as an uptime check. It exposes only status counters — no clip URLs, no member
-names, no configuration. Set `HTTP_PORT=0` to turn it off entirely if you would rather
-not have it public.
-
-**The OAuth redirect URI does not change.** It is used only by the one-time consent
-flow; the running bot authenticates with the refresh token and never receives a
-redirect. Run `npm run youtube:auth` **on your laptop**, keep
-`http://localhost:8787/oauth2callback` registered in Google Cloud, and paste the
-resulting `YOUTUBE_REFRESH_TOKEN` into Dokploy's Environment tab. Adding
-`bot.mohammadalsmadi.com` as a redirect URI would do nothing.
-
-Run the one-off commands against the running container:
-
-```bash
-docker compose exec clipreel node dist/scripts/doctor.js
-```
-
-```bash
-docker compose exec clipreel node dist/scripts/backfill.js
-```
-
-On Dokploy use the **Terminal** tab on the application, which drops you into the same
-container.
+---
 
 ## Configuration
 
-Every option lives in `.env` — see `.env.example` for the full annotated list. The
-ones you are most likely to touch:
+Every option lives in `.env`; `.env.example` documents all of them. The ones you are
+most likely to touch:
 
-| Variable              | Default             | Notes                                          |
-| --------------------- | ------------------- | ---------------------------------------------- |
-| `REEL_MAX_CLIPS`      | `20`                | Threshold that fires a reel immediately        |
-| `REEL_MIN_CLIPS`      | `5`                 | Floor for the weekly run                       |
-| `REEL_CRON`           | `0 18 * * 0`        | Sunday 18:00, honours `TZ`                     |
-| `TRANSITION_DURATION` | `0.5`               | Crossfade length in seconds                    |
-| `TRANSITIONS`         | `fade,wipeleft,…`   | Any `xfade` transition names, used round-robin |
-| `MAX_CLIP_SECONDS`    | `60`                | Longer clips are trimmed                       |
-| `PHASH_THRESHOLD`     | `8`                 | Raise to catch more duplicates, lower if false positives appear |
-| `YOUTUBE_AUTO_PUBLISH`| `false`             | `true` uploads straight at `YOUTUBE_PRIVACY`   |
-| `TITLE_CARDS`         | `false`             | `true` burns `@author` over each clip          |
-| `THUMBNAIL_LABEL`     | `GAMING CLIPS`      | Text across the thumbnail band                 |
-| `THUMBNAIL_ACCENT`    | `0xE62117`          | Badge and rule colour — `0x`, never `#`        |
-| `X264_PRESET`         | `veryfast`          | `slow` for smaller files, much longer compiles |
-| `STITCH_BATCH`        | `4`                 | Memory dial — see Resource use                 |
-| `FFMPEG_THREADS`      | `0`                 | 0 = one thread per core                        |
-| `INGEST_CONCURRENCY`  | `2`                 | Simultaneous downloads                         |
-| `BACKFILL_MAX_REELS`  | `5`                 | Reels per backfill run, under the daily quota  |
-| `MIN_FREE_DISK_MB`    | `2048`              | Ingest refuses to run below this               |
-| `HTTP_PORT`           | `3000`              | `/health` endpoint; 0 disables it              |
-| `REJECT_REACTION`     | `❌`                | React with this to pull a clip from the queue  |
-| `VETO_ALLOWED`        | `owner`             | `owner` / `admins` / `authors` — who it obeys  |
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `REEL_MAX_CLIPS` | `20` | Threshold that fires a reel immediately |
+| `REEL_CRON` | `0 18 * * 0` | Sunday 18:00, honours `TZ` |
+| `OUTPUT_WIDTH` / `OUTPUT_HEIGHT` | `1920`/`1080` | 720p halves memory and encode time |
+| `STITCH_BATCH` | `4` | The memory dial |
+| `MAX_CLIP_SECONDS` | `60` | Longer clips are trimmed |
+| `PHASH_THRESHOLD` | `8` | Raise to catch more duplicates |
+| `YOUTUBE_AUTO_PUBLISH` | `false` | `true` uploads at `YOUTUBE_PRIVACY` |
+| `VETO_ALLOWED` | `owner` | Who the ❌ reaction obeys |
+| `MAX_PENDING_UPLOADS` | `3` | Built reels allowed to await quota |
 
-For a vertical Shorts cut, set `OUTPUT_WIDTH=1080`, `OUTPUT_HEIGHT=1920` and
-`MAX_CLIP_SECONDS` low enough to keep the reel under 60s.
+---
 
 ## Layout
 
 ```
 src/
-  config.ts          env parsing and validation (zod), creates data dirs
-  pipeline.ts        select clips → compile → upload → announce, with the run lock
-  db/                SQLite schema and the clips/reels repositories
-  discord/           client, message collector, slash commands, announcements
-  ingest/            download, ffprobe metadata, hashing and fingerprinting
-  video/             ffmpeg runner, per-clip normalize, xfade stitch, thumbnail
-  youtube/           OAuth, metadata builder, resumable upload
-  scheduler/         weekly cron and the threshold check
-  drain.ts           full-history backfill driven into 20-clip reels
-  heartbeat.ts       liveness file behind the container healthcheck
-  http.ts            GET /health status endpoint
-scripts/
-  youtube-auth.ts    one-time consent flow that prints the refresh token
-  doctor.ts          checks every integration point, changes nothing
-  backfill.ts        walk the whole channel and build reels from it
-  run-now.ts         compile and upload immediately
-  healthcheck.ts     container healthcheck entry point
+  config.ts      env parsing and validation, creates data dirs
+  pipeline.ts    select clips → compile → upload → announce, with the run lock
+  drain.ts       full-history backfill driven into 20-clip reels
+  jobs.ts        one-slot job queue so long runs live in the bot, not a terminal
+  db/            SQLite schema and the clips/reels repositories
+  discord/       client, collector, commands, veto reactions, announcements
+  ingest/        download, probe, hashing and fingerprinting
+  video/         ffmpeg runner, normalize, stitch, thumbnail
+  youtube/       OAuth, metadata, resumable upload with retry
+scripts/         doctor, backfill, youtube-auth, youtube-cleanup, healthcheck
 ```
 
-State lives in `data/`: `clipreel.db`, downloaded clips in `raw/`, intermediates in
-`work/`, finished reels in `out/`. Set `CLEANUP_SOURCES=true` to delete source clips
-once their reel is uploaded.
+---
+
+## Contributing
+
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). The
+short version: `npm run typecheck && npm run lint` before you push, and if you touch
+the video pipeline, measure the thing you changed.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

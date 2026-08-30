@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stitch — one video out of twenty clips</title>
+<meta name="description" content="A Discord bot that collects your community's gaming clips, throws away the duplicates, and sews the rest into one video on YouTube.">
+<meta property="og:title" content="Stitch">
+<meta property="og:description" content="Twenty ragged clips in. One seamless reel out.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='112' fill='%230E1533'/%3E%3Ccircle cx='256' cy='262' r='134' fill='%235BC8F5'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --ink:#0E1533; --ink-2:#131C42; --line:rgba(123,224,255,.16);
+    --sky:#5BC8F5; --deep:#3B6FE0; --pale:#EAF6FF;
+    --muted:#9BB0D8; --accent:#7BE0FF;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; font-family:var(--sans); color:var(--pale); background:var(--ink);
+    -webkit-font-smoothing:antialiased; line-height:1.65;
+  }
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      radial-gradient(60rem 40rem at 12% -10%, rgba(91,200,245,.13), transparent 60%),
+      radial-gradient(50rem 36rem at 92% 4%, rgba(59,111,224,.16), transparent 62%);
+  }
+  .wrap{position:relative; z-index:1; max-width:1060px; margin:0 auto; padding:0 24px}
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* ---------- hero ---------- */
+  header{padding:76px 0 56px; text-align:center}
+  .logo{width:120px;height:120px;filter:drop-shadow(0 18px 40px rgba(59,111,224,.4))}
+  h1{
+    font-size:clamp(2.9rem,8vw,4.6rem); margin:.35em 0 .1em; letter-spacing:-.03em;
+    background:linear-gradient(180deg,#fff,#7BE0FF); -webkit-background-clip:text;
+    background-clip:text; color:transparent;
+  }
+  .tagline{font-size:clamp(1.05rem,2.4vw,1.3rem); color:var(--muted); max-width:34ch; margin:0 auto}
+  .cta{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:32px}
+  .btn{
+    display:inline-block; padding:12px 24px; border-radius:11px; font-weight:600;
+    border:1px solid transparent; transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .btn:hover{transform:translateY(-2px); text-decoration:none}
+  .btn-primary{background:linear-gradient(135deg,var(--sky),var(--deep)); color:#06102b;
+    box-shadow:0 10px 26px rgba(59,111,224,.4)}
+  .btn-ghost{border-color:var(--line); color:var(--pale); background:rgba(255,255,255,.03)}
+
+  /* ---------- sections ---------- */
+  section{padding:56px 0; border-top:1px solid var(--line)}
+  h2{font-size:1.7rem; letter-spacing:-.02em; margin:0 0 .5em}
+  h2 .em{color:var(--sky)}
+  p{color:var(--muted); max-width:68ch}
+  p strong{color:var(--pale); font-weight:600}
+
+  .quip{
+    border-left:3px solid var(--sky); padding:2px 0 2px 20px; margin:26px 0;
+    color:var(--pale); font-size:1.06rem;
+  }
+
+  /* ---------- pipeline ---------- */
+  .flow{
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:26px;
+    font-family:var(--mono); font-size:.85rem;
+  }
+  .node{padding:9px 14px; border:1px solid var(--line); border-radius:9px;
+    background:rgba(123,224,255,.05); white-space:nowrap}
+  .node.hi{border-color:rgba(91,200,245,.5); background:rgba(91,200,245,.12); color:#fff}
+  .arrow{color:var(--sky); opacity:.65}
+
+  /* ---------- cards ---------- */
+  .grid{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(258px,1fr)); margin-top:28px}
+  .card{
+    border:1px solid var(--line); border-radius:14px; padding:22px;
+    background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.015));
+  }
+  .card h3{margin:.1em 0 .45em; font-size:1.04rem; color:#fff}
+  .card p{margin:0; font-size:.94rem}
+  .card .ico{font-size:1.4rem; line-height:1}
+
+  /* ---------- numbers ---------- */
+  .stats{display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); margin-top:28px}
+  .stat{border:1px solid var(--line); border-radius:14px; padding:22px; text-align:center;
+    background:rgba(123,224,255,.04)}
+  .stat b{display:block; font-size:1.9rem; color:var(--sky); letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+  .stat span{font-size:.88rem; color:var(--muted)}
+
+  /* ---------- code ---------- */
+  pre{
+    background:var(--ink-2); border:1px solid var(--line); border-radius:12px;
+    padding:18px 20px; overflow-x:auto; font-family:var(--mono); font-size:.87rem;
+    color:#CFE6FF; line-height:1.75;
+  }
+  pre .c{color:#6F86B8}
+  pre .p{color:var(--sky)}
+
+  footer{padding:44px 0 60px; border-top:1px solid var(--line); color:var(--muted); font-size:.9rem}
+  .foot{display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; align-items:center}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none !important}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header>
+  <svg class="logo" viewBox="0 0 512 512" role="img" aria-label="Stitch logo">
+    <defs>
+      <linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5BC8F5"/><stop offset="1" stop-color="#3B6FE0"/></linearGradient>
+      <linearGradient id="e" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4FB4EA"/><stop offset="1" stop-color="#2F58C4"/></linearGradient>
+      <linearGradient id="r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7BE0FF"/><stop offset="1" stop-color="#5A6BF0"/></linearGradient>
+    </defs>
+    <rect width="512" height="512" rx="112" fill="#0E1533"/>
+    <circle cx="256" cy="262" r="176" fill="none" stroke="url(#r)" stroke-width="8" stroke-linecap="round" stroke-dasharray="26 20" opacity=".55"/>
+    <g fill="url(#e)">
+      <path d="M150 152c-26-44-22-84 6-92 27-8 52 22 62 74z"/>
+      <path d="M362 152c26-44 22-84-6-92-27-8-52 22-62 74z"/>
+    </g>
+    <path d="M256 122c78 0 132 54 132 128 0 76-58 128-132 128s-132-52-132-128c0-74 54-128 132-128z" fill="url(#b)"/>
+    <path d="M256 124v34M256 352v26" stroke="#0E1533" stroke-width="6" opacity=".4"/>
+    <g stroke="#EAF6FF" stroke-width="8" stroke-linecap="round" opacity=".95">
+      <path d="M240 136l32 18"/><path d="M240 166l32 18"/><path d="M240 336l32 18"/><path d="M240 366l32 18"/>
+    </g>
+    <g fill="#0E1533" opacity=".28">
+      <rect x="150" y="196" width="22" height="16" rx="5"/><rect x="150" y="240" width="22" height="16" rx="5"/><rect x="150" y="284" width="22" height="16" rx="5"/>
+      <rect x="340" y="196" width="22" height="16" rx="5"/><rect x="340" y="240" width="22" height="16" rx="5"/><rect x="340" y="284" width="22" height="16" rx="5"/>
+    </g>
+    <ellipse cx="206" cy="232" rx="30" ry="34" fill="#0E1533"/><ellipse cx="306" cy="232" rx="30" ry="34" fill="#0E1533"/>
+    <circle cx="215" cy="221" r="10" fill="#fff"/><circle cx="315" cy="221" r="10" fill="#fff"/>
+    <path d="M212 300c14 22 30 33 44 33s30-11 44-33" fill="none" stroke="#0E1533" stroke-width="12" stroke-linecap="round"/>
+  </svg>
+
+  <h1>Stitch</h1>
+  <p class="tagline">Twenty ragged clips in. One seamless reel out.</p>
+
+  <div class="cta">
+    <a class="btn btn-primary" href="https://github.com/YOUR_USER/stitch">View on GitHub</a>
+    <a class="btn btn-ghost" href="#start">Get started</a>
+  </div>
+</header>
+
+<section>
+  <h2>Why <span class="em">Stitch</span>?</h2>
+  <p>Because that is literally the job. Every crossfade is a stitch, the reel is the
+  quilt, and <code>ffmpeg</code> is the sewing machine doing the needlework at three in
+  the morning while you sleep.</p>
+
+  <p class="quip">We considered calling it Quilt. Nobody wants to tell their friends
+  about a Discord bot called Quilt.</p>
+
+  <p>It fits the temperament too. Stitch takes a pile of chaotic, badly-behaved little
+  monsters that have nothing in common — different resolutions, different frame rates,
+  one of them has no audio at all, one of them is somehow 4:3 — and patiently makes them
+  into a family. <strong>Nothing gets left in the queue.</strong></p>
+</section>
+
+<section>
+  <h2>How it works</h2>
+  <div class="flow">
+    <span class="node">#gaming-clips</span><span class="arrow">→</span>
+    <span class="node">ingest</span><span class="arrow">→</span>
+    <span class="node hi">dedupe</span><span class="arrow">→</span>
+    <span class="node">queue</span><span class="arrow">→</span>
+    <span class="node">normalize</span><span class="arrow">→</span>
+    <span class="node hi">stitch</span><span class="arrow">→</span>
+    <span class="node">YouTube</span>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="ico">🧵</div>
+      <h3>Sews, doesn't staple</h3>
+      <p>Every clip is normalized to one resolution, frame rate and loudness first, so
+      twenty mismatched sources cut together without a jolt.</p>
+    </div>
+    <div class="card">
+      <div class="ico">👀</div>
+      <h3>Spots repeats</h3>
+      <p>Three layers of duplicate detection, including a perceptual fingerprint that
+      recognises the same clip re-uploaded through a different capture tool.</p>
+    </div>
+    <div class="card">
+      <div class="ico">🔒</div>
+      <h3>Private until you say so</h3>
+      <p>Uploads land private by default. Publishing is a decision someone makes, never
+      a side effect of a config file.</p>
+    </div>
+    <div class="card">
+      <div class="ico">🪶</div>
+      <h3>Fits on a small box</h3>
+      <p>Peak memory is a tuning knob, not a surprise. Clips fold in batches so a
+      twenty-clip reel never needs four gigabytes.</p>
+    </div>
+    <div class="card">
+      <div class="ico">❌</div>
+      <h3>Veto with a reaction</h3>
+      <p>React on a clip and it leaves the queue. Remove the reaction and it comes back.
+      You choose who the bot listens to.</p>
+    </div>
+    <div class="card">
+      <div class="ico">🔁</div>
+      <h3>Survives the night</h3>
+      <p>Quota exhausted, container restarted, terminal closed — it picks up where it
+      stopped and finishes without being asked.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Measured, not guessed</h2>
+  <p>The fiddly parts of a video pipeline fail invisibly. These numbers come from the
+  test suite, not from watching the output and nodding.</p>
+  <div class="stats">
+    <div class="stat"><b>−323 → −44 ms</b><span>audio drift across a reel, and no longer accumulating</span></div>
+    <div class="stat"><b>0.8 vs 22–38</b><span>fingerprint distance: same clip re-encoded vs unrelated footage</span></div>
+    <div class="stat"><b>4.5 GB → 1.2 GB</b><span>peak memory, by folding clips in batches</span></div>
+  </div>
+</section>
+
+<section id="start">
+  <h2>Get started</h2>
+  <p>Clone it, fill in four values, and let <code>doctor</code> tell you what is missing.
+  You do not need YouTube credentials to try it — leave them blank and reels are
+  compiled locally so you can watch one before pointing it at a real channel.</p>
+<pre><span class="c"># clone and install</span>
+git clone https://github.com/YOUR_USER/stitch.git
+cd stitch &amp;&amp; npm install &amp;&amp; cp .env.example .env
+
+<span class="c"># check every integration point — changes nothing</span>
+npm run <span class="p">doctor</span>
+
+<span class="c"># run it</span>
+npm run <span class="p">dev</span></pre>
+</section>
+
+<footer>
+  <div class="foot">
+    <span>MIT licensed · Built with TypeScript, discord.js and ffmpeg</span>
+    <span><a href="https://github.com/YOUR_USER/stitch">GitHub</a> · <a href="https://github.com/YOUR_USER/stitch/blob/main/CONTRIBUTING.md">Contributing</a></span>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

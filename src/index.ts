@@ -21,7 +21,7 @@ async function main(): Promise<void> {
       cron: config.trigger.cron,
       youtube: config.youtube.enabled ? config.youtube.privacy : 'disabled',
     },
-    'clipreel starting',
+    'stitch starting',
   );
 
   if (!config.youtube.enabled) {
