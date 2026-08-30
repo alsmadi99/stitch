@@ -19,6 +19,7 @@ import { resetState } from './reset.js';
 
 const REQUEST_KEY = 'job:request';
 const STATE_KEY = 'job:state';
+const CANCEL_KEY = 'job:cancel';
 
 export interface JobRequest {
   kind: 'backfill';
@@ -39,7 +40,7 @@ export interface JobProgress {
 
 export interface JobState {
   kind: 'backfill';
-  status: 'queued' | 'running' | 'done' | 'failed' | 'interrupted';
+  status: 'queued' | 'running' | 'done' | 'failed' | 'interrupted' | 'cancelled';
   requestedAt: string;
   startedAt?: string;
   finishedAt?: string;
@@ -93,6 +94,46 @@ export function requestBackfill(
   return state;
 }
 
+/**
+ * Asks a running backfill to stop.
+ *
+ * The work happens inside the bot, so this cannot reach in and kill it; it raises a flag
+ * the scan checks between pages and between reels. Stopping at a checkpoint rather than
+ * mid-encode is deliberate — the cursor stays consistent and a half-built reel is never
+ * left behind. A compile already in flight finishes first, which can take minutes.
+ *
+ * Works whether or not the bot is running: with it down, this simply clears the state so
+ * the next boot does not auto-resume.
+ */
+export function requestCancel(): { wasActive: boolean; status: string | null } {
+  const state = readJobState();
+  const active = state?.status === 'running' || state?.status === 'queued';
+
+  kvSet(CANCEL_KEY, new Date().toISOString());
+  db.prepare('DELETE FROM kv WHERE key = ?').run(REQUEST_KEY);
+
+  // Marked cancelled immediately so a restart before the loop notices cannot resume it.
+  if (state) {
+    writeJobState({
+      ...state,
+      status: 'cancelled',
+      finishedAt: new Date().toISOString(),
+      stoppedBy: 'cancelled',
+      detail: 'cancelled by request',
+    });
+  }
+
+  return { wasActive: active, status: state?.status ?? null };
+}
+
+export function isCancelRequested(): boolean {
+  return kvGet(CANCEL_KEY) !== null;
+}
+
+export function clearCancel(): void {
+  db.prepare('DELETE FROM kv WHERE key = ?').run(CANCEL_KEY);
+}
+
 /** Reads and clears the pending request in one transaction, so two ticks cannot race. */
 function claimRequest(): JobRequest | null {
   const claim = db.transaction(() => {
@@ -120,8 +161,24 @@ export function recoverInterruptedJob(): void {
   const state = readJobState();
   if (!state || (state.status !== 'running' && state.status !== 'queued')) return;
 
+  // A cancel raised before the process died outranks auto-resume: the whole point of
+  // stopping a backfill is that it stays stopped.
+  const cancelled = isCancelRequested();
   const resumes = (state.resumes ?? 0) + 1;
-  const canResume = Boolean(state.request) && resumes <= MAX_AUTO_RESUMES;
+  const canResume = !cancelled && Boolean(state.request) && resumes <= MAX_AUTO_RESUMES;
+
+  if (cancelled) {
+    clearCancel();
+    writeJobState({
+      ...state,
+      status: 'cancelled',
+      finishedAt: new Date().toISOString(),
+      stoppedBy: 'cancelled',
+      detail: 'cancelled before the restart',
+    });
+    logger.warn('a cancelled backfill was not resumed');
+    return;
+  }
 
   writeJobState({
     ...state,
@@ -147,6 +204,7 @@ export function recoverInterruptedJob(): void {
  * Continuing automatically is what turns that into one command instead of one a day.
  */
 const CONTINUABLE = new Set(['quota', 'deferred', 'pendingCap', 'maxReels']);
+// 'cancelled' is deliberately absent — a stopped backfill stays stopped.
 
 /**
  * Re-queues a backfill that stopped early, once there is room to upload again. Called
@@ -231,6 +289,9 @@ async function runBackfill(client: Client, request: JobRequest): Promise<void> {
       ...extra,
     });
 
+  // A cancel left over from a previous run must not stop this one before it starts.
+  clearCancel();
+
   publish('running');
   logger.info({ request }, 'backfill job started');
 
@@ -242,6 +303,7 @@ async function runBackfill(client: Client, request: JobRequest): Promise<void> {
   const result: DrainResult = await drainHistory(client, {
     limit: request.limit,
     maxReels: request.maxReels,
+    shouldStop: isCancelRequested,
     onProgress: (p) => {
       progress = p;
       publish('running');
@@ -256,7 +318,12 @@ async function runBackfill(client: Client, request: JobRequest): Promise<void> {
     reels: result.reels,
   };
 
-  publish(result.stoppedBy === 'error' ? 'failed' : 'done', {
+  if (result.stoppedBy === 'cancelled') clearCancel();
+
+  const finalStatus =
+    result.stoppedBy === 'error' ? 'failed' : result.stoppedBy === 'cancelled' ? 'cancelled' : 'done';
+
+  publish(finalStatus, {
     finishedAt: new Date().toISOString(),
     detail: describeDrain(result),
     stoppedBy: result.stoppedBy,

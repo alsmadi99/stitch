@@ -80,6 +80,8 @@ export interface BackfillOptions {
    */
   onThreshold?: () => Promise<boolean>;
   onProgress?: (stats: BackfillStats) => void;
+  /** Polled between pages and before each reel; returning true ends the scan cleanly. */
+  shouldStop?: () => boolean;
 }
 
 function cursorKey(): string {
@@ -111,6 +113,10 @@ export async function backfill(
 
   for (;;) {
     if (stats.scanned >= limit) break;
+    if (options.shouldStop?.()) {
+      logger.info(stats, 'backfill stopped on request');
+      break;
+    }
 
     const page = await (channel as TextChannel).messages.fetch({
       limit: Math.min(100, limit - stats.scanned),

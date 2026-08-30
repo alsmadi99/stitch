@@ -127,6 +127,7 @@ never receives a redirect, so the redirect URI does not change when you deploy.
 ```bash
 npm run backfill          # walk the entire channel history and reel it all
 npm run backfill:status   # check on it from anywhere
+npm run backfill:stop     # ask a running backfill to stop at its next checkpoint
 npm run doctor            # verify every integration point
 npm run reel:now          # compile and upload immediately
 npm run youtube:cleanup   # delete videos this bot uploaded

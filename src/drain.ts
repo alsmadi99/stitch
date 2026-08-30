@@ -14,6 +14,7 @@ export type StopReason =
   | 'deferred'
   | 'pendingCap'
   | 'maxReels'
+  | 'cancelled'
   | 'disk'
   | 'error';
 
@@ -32,6 +33,8 @@ export interface DrainOptions {
   maxReels?: number;
   /** Called after each page and each reel, so a caller can report live progress. */
   onProgress?: (progress: BackfillStats & { reels: number }) => void;
+  /** Polled at checkpoints; returning true stops the scan cleanly. */
+  shouldStop?: () => boolean;
 }
 
 /**
@@ -54,6 +57,12 @@ export async function drainHistory(client: Client, options: DrainOptions = {}): 
   let detail: string | undefined;
 
   const buildReel = async (): Promise<boolean> => {
+    if (options.shouldStop?.()) {
+      stoppedBy = 'cancelled';
+      detail = 'stopped on request before building the next reel';
+      return false;
+    }
+
     if (reels >= maxReels) {
       stoppedBy = 'maxReels';
       detail = `reached the ${maxReels} reel cap for this run`;
@@ -97,6 +106,7 @@ export async function drainHistory(client: Client, options: DrainOptions = {}): 
       limit: options.limit,
       restart: options.restart,
       onThreshold: buildReel,
+      shouldStop: options.shouldStop,
       onProgress: (s) => {
         lastStats = s;
         logger.info({ ...s, reels }, 'drain progress');

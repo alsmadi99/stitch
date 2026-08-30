@@ -8,6 +8,7 @@
  *
  *   npm run backfill                 walk everything, resuming from last position
  *   npm run backfill -- --status     show the current job and exit
+ *   npm run backfill -- --stop       ask a running backfill to stop at its next checkpoint
  *   npm run backfill -- --limit 500  only scan the next 500 messages
  *   npm run backfill -- --reels 3    stop after 3 reels instead of BACKFILL_MAX_REELS
  *   npm run backfill -- --restart    DESTRUCTIVE: wipe the database and every file
@@ -15,7 +16,7 @@
  *   npm run backfill -- --force      skip the confirmation delay on --restart
  */
 import { HEARTBEAT_MAX_AGE_MS, heartbeatAgeMs } from '../src/heartbeat.js';
-import { readJobState, requestBackfill, type JobState } from '../src/jobs.js';
+import { readJobState, requestBackfill, requestCancel, type JobState } from '../src/jobs.js';
 import { describeState } from '../src/reset.js';
 
 function flag(name: string): boolean {
@@ -48,6 +49,18 @@ if (flag('status')) {
   process.exit(0);
 }
 
+if (flag('stop')) {
+  const { wasActive, status } = requestCancel();
+  if (wasActive) {
+    console.log(`Stopping the backfill (was ${status}).`);
+    console.log('It finishes the reel it is compiling, then stops — that can take minutes.');
+    console.log('Progress is saved; `npm run backfill` later continues from the cursor.');
+  } else {
+    console.log(`No backfill was running${status ? ` (last job: ${status})` : ''}. State cleared anyway.`);
+  }
+  process.exit(0);
+}
+
 // The job runs inside the bot, so there is no point filing a request it will never see.
 const age = heartbeatAgeMs();
 if (age === null || age > HEARTBEAT_MAX_AGE_MS) {
@@ -61,7 +74,7 @@ if (age === null || age > HEARTBEAT_MAX_AGE_MS) {
 const running = readJobState();
 if (running?.status === 'running' || running?.status === 'queued') {
   console.error(`A backfill is already ${running.status}: ${render(running)}`);
-  console.error('Watch it with --status, or wait for it to finish.');
+  console.error('Watch it with --status, or stop it with --stop, then start a new one.');
   process.exit(1);
 }
 
