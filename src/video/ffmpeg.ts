@@ -160,6 +160,9 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
         const facts = [
           mem.limitMb !== null ? `limit ${mem.limitMb}MB` : 'no container memory limit',
           mem.peakMb !== null ? `peak ${mem.peakMb}MB` : null,
+          mem.anonMb !== null ? `anon ${mem.anonMb}MB` : null,
+          mem.cacheMb !== null ? `cache ${mem.cacheMb}MB` : null,
+          `config ${config.video.width}x${config.video.height} batch ${config.video.stitchBatch}`,
           mem.oomKills !== null ? `${mem.oomKills} OOM kill(s) on this container` : null,
         ]
           .filter(Boolean)
@@ -215,6 +218,10 @@ export interface MemorySnapshot {
   peakMb: number | null;
   /** Kernel OOM kills counted against this cgroup since boot. */
   oomKills: number | null;
+  /** Anonymous memory — what processes actually allocated. */
+  anonMb: number | null;
+  /** Page cache. Counts against the cgroup limit but is reclaimable. */
+  cacheMb: number | null;
 }
 
 /**
@@ -235,10 +242,21 @@ export function memorySnapshot(): MemorySnapshot {
     return Math.round(bytes / 1_048_576);
   };
 
+  // Splitting anonymous memory from page cache matters: a peak equal to the limit says
+  // nothing on its own, because reading and writing video fills the cache and that
+  // counts against the cgroup too. Only the anonymous figure is what ffmpeg allocated.
+  const stat = readCgroup('/sys/fs/cgroup/memory.stat', '/sys/fs/cgroup/memory/memory.stat');
+  const fromStat = (key: string): number | null => {
+    const raw = stat?.match(new RegExp(`^${key} (\\d+)$`, 'm'))?.[1];
+    return raw === undefined ? null : Math.round(Number(raw) / 1_048_576);
+  };
+
   return {
     limitMb: containerMemoryLimitMb(),
     peakMb: toMb(readCgroup('/sys/fs/cgroup/memory.peak', '/sys/fs/cgroup/memory/memory.max_usage_in_bytes')),
     oomKills: oomFromV2 !== undefined ? Number(oomFromV2) : oomFromV1 !== null ? Number(oomFromV1) : null,
+    anonMb: fromStat('anon') ?? fromStat('rss'),
+    cacheMb: fromStat('file') ?? fromStat('cache'),
   };
 }
 

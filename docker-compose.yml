@@ -9,7 +9,9 @@
 # the memory dial. A single call with all 20 clips would need roughly 4.5 GB and get
 # OOM-killed on an 8 GB box — hence the batching.
 #
-# The settings below are 720p with STITCH_BATCH=5, estimated near 1.5 GB including Node.
+# The settings below are 720p with STITCH_BATCH=3, estimated near 1.2 GB including Node.
+# Batch 5 was tried and still hit the 3 GB ceiling; 3 holds fewer decoders open at once
+# at the cost of one extra tree level.
 #
 # 1080p was tried first and did not survive contact with real footage: synthetic clips
 # peaked around 1 GB at batch 3, while actual gameplay drove the container past a 3 GB
@@ -37,7 +39,7 @@ services:
       NODE_OPTIONS: --max-old-space-size=256
 
       # --- resource dials ---
-      STITCH_BATCH: 5
+      STITCH_BATCH: 3
       FFMPEG_THREADS: 2
       INGEST_CONCURRENCY: 1
       X264_PRESET: veryfast

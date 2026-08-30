@@ -67,7 +67,15 @@ export async function compileReel(
   if (clips.length === 0) throw new Error('nothing to compile');
 
   const log = logger.child({ reelId });
-  log.info({ clips: clips.length }, 'normalizing clips');
+  log.info(
+    {
+      clips: clips.length,
+      video: `${config.video.width}x${config.video.height}`,
+      stitchBatch: config.video.stitchBatch,
+      threads: config.video.threads,
+    },
+    'normalizing clips',
+  );
 
   const normalized: NormalizedClip[] = [];
   for (const [i, clip] of clips.entries()) {
@@ -88,7 +96,15 @@ export async function compileReel(
   let level = 0;
   while (segments.length > 1) {
     const batches = chunk(segments, config.video.stitchBatch);
-    log.info({ level, segments: segments.length, batches: batches.length }, 'stitching');
+    log.info(
+      {
+        level,
+        segments: segments.length,
+        batches: batches.length,
+        inputsPerBatch: Math.min(config.video.stitchBatch, segments.length),
+      },
+      'stitching',
+    );
 
     // The last level produces the file that ships, so it gets the configured quality.
     const isFinalLevel = batches.length === 1;
