@@ -37,7 +37,7 @@ import { config } from '../src/config.js';
 import { logger } from '../src/logger.js';
 import { clipsForReel, updateClip } from '../src/db/clips.js';
 import { completedReelCount, findByEpisode, getReel, latestReel, updateReel } from '../src/db/reels.js';
-import { isCompilingAnywhere } from '../src/pipeline.js';
+import { acquireCompileLock, releaseCompileLock } from '../src/pipeline.js';
 import { compileReel } from '../src/video/compile.js';
 import { downloadDirect, downloadViaYtDlp } from '../src/ingest/download.js';
 import { probe } from '../src/ingest/probe.js';
@@ -90,11 +90,14 @@ if (!reel) {
   process.exit(1);
 }
 
-// A rebuild rewrites files a running pipeline may be reading, and takes the same clips.
-if (isCompilingAnywhere()) {
+// Held, not merely checked: the bot can start a reel of its own in the gap between a
+// check and the compile, and two ffmpeg runs on this host is an OOM kill.
+if (!acquireCompileLock()) {
   console.error('A compile is already running. Wait for it to finish, or stop the bot first.');
   process.exit(1);
 }
+// Every exit path below goes through here, including the process.exit calls.
+process.on('exit', releaseCompileLock);
 
 const clips = clipsForReel(reel.id);
 if (clips.length === 0) {

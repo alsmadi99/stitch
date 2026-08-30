@@ -185,6 +185,24 @@ function acquireLock(): boolean {
   }
 }
 
+/**
+ * Takes the compile lock for a process that is not `runPipeline` — currently `rebuild`.
+ *
+ * Checking `isCompilingAnywhere()` and then compiling is not the same thing as holding
+ * the lock: the bot can start its own reel in the gap between the two. Two ffmpeg
+ * compiles on a host sized for one is how this project spent a week being OOM-killed.
+ *
+ * Returns false when someone else holds it; the caller is expected to give up.
+ */
+export function acquireCompileLock(): boolean {
+  return acquireLock();
+}
+
+/** Releases a lock taken with `acquireCompileLock`. Safe to call when not holding one. */
+export function releaseCompileLock(): void {
+  releaseLock();
+}
+
 function isAlive(pid: number): boolean {
   try {
     // Signal 0 performs the permission and existence check without delivering anything.
