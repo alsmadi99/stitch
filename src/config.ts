@@ -76,6 +76,20 @@ const schema = z.object({
 
   MAX_DOWNLOAD_BYTES: num(209_715_200),
   ALLOW_LINKS: bool(true),
+  /**
+   * Who may have a link fetched on their behalf. Empty means anyone in the channel.
+   *
+   * A link costs a yt-dlp run against a third-party site, which is a far bigger lever
+   * than posting a file — so it is worth being able to hand it to a few people only.
+   */
+  LINK_ALLOWED_USER_IDS: csv(),
+  /**
+   * Size cap for links specifically, separate from `MAX_DOWNLOAD_BYTES`.
+   *
+   * A Discord upload is already capped by Discord. A YouTube link is not: the same URL
+   * can be a 30-second clip or a three-hour VOD, and only the cap stops the latter.
+   */
+  MAX_LINK_BYTES: num(62_914_560),
   PHASH_THRESHOLD: num(8),
   MIN_FREE_DISK_MB: num(2048),
   INGEST_CONCURRENCY: num(2),
@@ -203,6 +217,8 @@ export const config = {
   ingest: {
     maxDownloadBytes: env.MAX_DOWNLOAD_BYTES,
     allowLinks: env.ALLOW_LINKS,
+    linkAllowedUserIds: env.LINK_ALLOWED_USER_IDS,
+    maxLinkBytes: env.MAX_LINK_BYTES,
     phashThreshold: env.PHASH_THRESHOLD,
     minFreeDiskMb: env.MIN_FREE_DISK_MB,
     concurrency: Math.max(1, env.INGEST_CONCURRENCY),

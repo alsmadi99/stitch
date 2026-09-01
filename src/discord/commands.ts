@@ -118,11 +118,23 @@ async function handleClips(interaction: ChatInputCommandInteraction): Promise<vo
     return;
   }
 
-  const pending = clipsRepo.countPending();
+  const queue = clipsRepo.queueBreakdown();
+  const pending = queue.waiting;
   const awaitingUpload = reelsRepo.pendingUploadCount();
   const last = reelsRepo.latestReel();
+  const shortBy = Math.max(0, config.trigger.maxClips - pending);
   const lines = [
-    `**${pending}** clip${pending === 1 ? '' : 's'} queued (reel fires at ${config.trigger.maxClips}).`,
+    `**${pending}** clip${pending === 1 ? '' : 's'} queued for the next reel (fires at ${config.trigger.maxClips}` +
+      `${shortBy > 0 ? `, ${shortBy} to go` : ''}).`,
+    queue.awaitingDownload > 0
+      ? `${queue.awaitingDownload} more seen but not downloaded yet.`
+      : null,
+    queue.oldestWaitingAt
+      ? `Oldest waiting since ${queue.oldestWaitingAt.slice(0, 10)}.`
+      : null,
+    queue.vetoed > 0 || queue.duplicate > 0 || queue.rejected > 0
+      ? `Set aside: ${queue.vetoed} vetoed, ${queue.duplicate} duplicate, ${queue.rejected} rejected.`
+      : null,
     isCompilingAnywhere() ? 'A reel is compiling right now.' : null,
     awaitingUpload > 0
       ? `${awaitingUpload} built reel${awaitingUpload === 1 ? '' : 's'} waiting to upload — retrying automatically.`

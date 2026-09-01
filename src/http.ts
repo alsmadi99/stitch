@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { config } from './config.js';
 import { logger } from './logger.js';
-import { countPending } from './db/clips.js';
+import { countPending, queueBreakdown } from './db/clips.js';
 import { latestReel, pendingUploadCount } from './db/reels.js';
 import { isCompilingAnywhere } from './pipeline.js';
 import { readJobState } from './jobs.js';
@@ -44,6 +44,11 @@ export function startHttpServer(isConnected: () => boolean): http.Server | null 
           discord: connected,
           compiling: isCompilingAnywhere(),
           queued: countPending(),
+          // What is waiting for the next reel, and what fell out on the way there.
+          nextReel: {
+            ...queueBreakdown(),
+            firesAt: config.trigger.maxClips,
+          },
           lastReel: latestReel()?.status ?? null,
           pendingUploads: pendingUploadCount(),
           backfill: jobSummary(),

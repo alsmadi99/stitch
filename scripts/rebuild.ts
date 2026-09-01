@@ -198,7 +198,11 @@ interface DiscordMessage {
 async function refetchClip(clip: ClipRow): Promise<string> {
   const destBase = path.join(config.paths.rawDir, `clip-${clip.id}`);
 
-  if (clip.source_type === 'link') return downloadViaYtDlp(clip.source_url, destBase);
+  // The same cap ingest applied, so a rebuild cannot pull a file the original run
+  // would have refused.
+  if (clip.source_type === 'link') {
+    return downloadViaYtDlp(clip.source_url, destBase, config.ingest.maxLinkBytes);
+  }
 
   const message = (await rest.get(
     Routes.channelMessage(clip.channel_id, clip.message_id),

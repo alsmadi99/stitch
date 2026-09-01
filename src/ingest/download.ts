@@ -60,10 +60,14 @@ export async function downloadDirect(url: string, destBase: string): Promise<str
 }
 
 /** Downloads a hosted clip (Medal, Streamable, Twitch, YouTube, …) via yt-dlp. */
-export async function downloadViaYtDlp(url: string, destBase: string): Promise<string> {
+export async function downloadViaYtDlp(
+  url: string,
+  destBase: string,
+  maxBytes = config.ingest.maxDownloadBytes,
+): Promise<string> {
   if (!(await hasYtDlp())) throw new DownloadError('yt-dlp is not installed');
 
-  const maxMb = Math.floor(config.ingest.maxDownloadBytes / 1_048_576);
+  const maxMb = Math.floor(maxBytes / 1_048_576);
   const args = [
     '--no-playlist',
     '--no-warnings',
@@ -97,5 +101,17 @@ export async function downloadViaYtDlp(url: string, destBase: string): Promise<s
   const stem = path.basename(destBase);
   const produced = (await fsp.readdir(dir)).find((f) => f.startsWith(`${stem}.`));
   if (!produced) throw new DownloadError('yt-dlp produced no file (likely over the size cap)');
-  return path.join(dir, produced);
+
+  // `--max-filesize` is checked against the size a site declares up front, which is
+  // missing or wrong often enough to matter — and when two streams are merged it applies
+  // to each, not the result. Measuring the finished file is the check that always holds.
+  const file = path.join(dir, produced);
+  const { size } = await fsp.stat(file);
+  if (size > maxBytes) {
+    await fsp.rm(file, { force: true });
+    throw new DownloadError(
+      `download is ${Math.round(size / 1_048_576)}MB, over the ${Math.round(maxBytes / 1_048_576)}MB cap for links`,
+    );
+  }
+  return file;
 }

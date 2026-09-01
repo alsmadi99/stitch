@@ -50,6 +50,54 @@ export function countPending(): number {
   return row?.n ?? 0;
 }
 
+export interface QueueBreakdown {
+  /** Downloaded and ready — these are the clips the next reel will be built from. */
+  waiting: number;
+  /** Recognised in the channel but not fetched yet: mid-download, or the download failed. */
+  awaitingDownload: number;
+  vetoed: number;
+  duplicate: number;
+  /** Downloaded but refused — too long, too short, or over the size cap for links. */
+  rejected: number;
+  failed: number;
+  /** When the longest-waiting ready clip was posted, so a stalled queue is visible. */
+  oldestWaitingAt: string | null;
+}
+
+/**
+ * What is sitting between "someone posted it" and "it is in a reel".
+ *
+ * A bare pending count hides the difference between a clip that is ready and one that
+ * was seen but never downloaded, and says nothing about the clips that were dropped on
+ * the way. Both are the questions actually asked when a reel looks short.
+ */
+export function queueBreakdown(): QueueBreakdown {
+  const count = (where: string): number => {
+    const row = db.prepare(`SELECT COUNT(*) AS n FROM clips WHERE ${where}`).get() as
+      | { n: number }
+      | undefined;
+    return row?.n ?? 0;
+  };
+
+  const oldest = db
+    .prepare(
+      `SELECT message_at FROM clips
+       WHERE status = 'pending' AND file_path IS NOT NULL
+       ORDER BY message_at ASC LIMIT 1`,
+    )
+    .get() as { message_at: string } | undefined;
+
+  return {
+    waiting: count("status = 'pending' AND file_path IS NOT NULL"),
+    awaitingDownload: count("status = 'pending' AND file_path IS NULL"),
+    vetoed: count("status = 'excluded'"),
+    duplicate: count("status = 'duplicate'"),
+    rejected: count("status = 'rejected'"),
+    failed: count("status = 'failed'"),
+    oldestWaitingAt: oldest?.message_at ?? null,
+  };
+}
+
 /** Oldest-first, so a reel is chronological and no clip starves in the queue. */
 export function takePending(limit: number): ClipRow[] {
   return db

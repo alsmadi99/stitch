@@ -63,7 +63,12 @@ export function extractCandidates(message: Message): Candidate[] {
     }
   }
 
-  if (config.ingest.allowLinks) {
+  // A link is fetched from a third-party site on the poster's say-so, which is a bigger
+  // lever than attaching a file. An empty allowlist keeps the old behaviour: anyone.
+  const allowed = config.ingest.linkAllowedUserIds;
+  const mayPostLinks = allowed.length === 0 || allowed.includes(message.author.id);
+
+  if (config.ingest.allowLinks && mayPostLinks) {
     const seen = new Set<string>();
     const texts = [message.content, ...message.embeds.map((e) => e.url ?? '')];
     for (const text of texts) {

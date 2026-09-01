@@ -53,7 +53,7 @@ export async function ingestCandidate(candidate: Candidate): Promise<IngestOutco
     file =
       candidate.sourceType === 'attachment'
         ? await downloadDirect(candidate.sourceUrl, destBase)
-        : await downloadViaYtDlp(candidate.sourceUrl, destBase);
+        : await downloadViaYtDlp(candidate.sourceUrl, destBase, config.ingest.maxLinkBytes);
 
     const meta = await probe(file);
 
