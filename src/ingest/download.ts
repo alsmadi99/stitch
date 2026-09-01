@@ -60,6 +60,28 @@ export async function downloadDirect(url: string, destBase: string): Promise<str
 }
 
 /** Downloads a hosted clip (Medal, Streamable, Twitch, YouTube, …) via yt-dlp. */
+/**
+ * Turns yt-dlp stderr into one line worth reading in a log.
+ *
+ * The bot check prints two wiki URLs and a paragraph, repeated on every rejected clip.
+ * What matters is which of the three fixes to reach for.
+ */
+function explainYtDlpFailure(code: number | null, stderr: string): string {
+  const last = stderr.trim().split('\n').slice(-1)[0] ?? '';
+
+  if (/confirm you.{0,3}re not a bot|Sign in to confirm/i.test(stderr)) {
+    return (
+      'YouTube refused this as a suspected bot — about the server IP, not the URL. Update ' +
+      'yt-dlp (rebuild the image), then try ingest.extractorArgs in src/constants.ts, then ' +
+      'drop a cookies.txt into the data directory.'
+    );
+  }
+  if (/Video unavailable|Private video|members-only/i.test(stderr)) {
+    return `the video is not publicly available (${last})`;
+  }
+  return `yt-dlp exited ${code}: ${last}`;
+}
+
 export async function downloadViaYtDlp(
   url: string,
   destBase: string,
@@ -85,11 +107,10 @@ export async function downloadViaYtDlp(
   // YouTube answers datacenter IPs with "Sign in to confirm you're not a bot". A cookie
   // jar is what clears it; which player client also works changes often enough that it
   // has to be configurable rather than pinned here.
+  // Absent is the normal case, so it is not worth a line in the log — the path is always
+  // set now that it is derived rather than configured.
   const cookies = config.ingest.ytdlpCookiesFile;
-  if (cookies) {
-    if (fs.existsSync(cookies)) args.push('--cookies', cookies);
-    else logger.warn({ cookies }, 'YTDLP_COOKIES_FILE is set but the file does not exist');
-  }
+  if (fs.existsSync(cookies)) args.push('--cookies', cookies);
   if (config.ingest.ytdlpExtractorArgs) {
     args.push('--extractor-args', config.ingest.ytdlpExtractorArgs);
   }
@@ -106,7 +127,7 @@ export async function downloadViaYtDlp(
     child.on('close', (code) =>
       code === 0
         ? resolve()
-        : reject(new DownloadError(`yt-dlp exited ${code}: ${err.trim().split('\n').slice(-1)[0]}`)),
+        : reject(new DownloadError(explainYtDlpFailure(code, err))),
     );
   });
 
