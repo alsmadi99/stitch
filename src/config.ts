@@ -57,7 +57,14 @@ const schema = z.object({
   MAX_CLIP_SECONDS: num(60),
   FFMPEG_THREADS: num(0),
 
-  ALLOW_LINKS: bool(true),
+  /**
+   * Whether a posted link is followed and downloaded, or ignored.
+   *
+   * Off: attachments are what members actually post, and a link is someone else's video
+   * going into a monetized compilation. YouTube also refuses the deploy host as bot
+   * traffic, so those links only ever produced rejected rows.
+   */
+  ALLOW_LINKS: bool(false),
   /** Who may have a link fetched on their behalf. Empty means anyone in the channel. */
   LINK_ALLOWED_USER_IDS: csv(),
 
