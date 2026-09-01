@@ -28,66 +28,26 @@ export class DownloadError extends Error {}
 export interface YtDlpReport {
   available: boolean;
   version: string | null;
-  /** Whether the bundled PO-token plugin was actually loaded from the image. */
-  potPluginLoaded: boolean;
-  /** Whether the provider named in `extractorArgs` answers. Null when none is set. */
-  potProviderReachable: boolean | null;
-}
-
-/** The `base_url=` value out of the configured extractor args, if there is one. */
-function potBaseUrl(): string | null {
-  const marker = 'base_url=';
-  const at = config.ingest.ytdlpExtractorArgs.indexOf(marker);
-  if (at === -1) return null;
-  const rest = config.ingest.ytdlpExtractorArgs.slice(at + marker.length);
-  return rest.split(' ')[0]?.split(',')[0] || null;
 }
 
 /**
- * What yt-dlp can actually do in this container, answered without a network call.
+ * Whether yt-dlp is usable, and which build it is.
  *
- * Every YouTube failure so far has had three candidate causes — stale binary, missing
- * plugin, unreachable provider — and no way to tell them apart from the outside. Asking
- * yt-dlp to load a deliberately invalid video id makes it print its plugin state and
- * stop, which distinguishes all three in about a second.
+ * Logged at startup because a link failure otherwise gives no way to tell a stale binary
+ * from a genuinely unsupported host.
  */
 export async function ytdlpReport(): Promise<YtDlpReport> {
-  if (!(await hasYtDlp())) {
-    return { available: false, version: null, potPluginLoaded: false, potProviderReachable: null };
-  }
+  if (!(await hasYtDlp())) return { available: false, version: null };
 
-  const run = (args: string[]): Promise<string> =>
-    new Promise((resolve) => {
-      const child = spawn(YTDLP, args, { windowsHide: true });
-      let out = '';
-      child.stdout.on('data', (d: Buffer) => (out += d.toString()));
-      child.stderr.on('data', (d: Buffer) => (out += d.toString()));
-      child.on('error', () => resolve(''));
-      child.on('close', () => resolve(out));
-    });
+  const version = await new Promise<string>((resolve) => {
+    const child = spawn(YTDLP, ['--version'], { windowsHide: true });
+    let out = '';
+    child.stdout.on('data', (d: Buffer) => (out += d.toString()));
+    child.on('error', () => resolve(''));
+    child.on('close', () => resolve(out));
+  });
 
-  const version = (await run(['--version'])).trim() || null;
-
-  // An 11-character id that cannot exist: the extractor loads, prints what it has, and
-  // fails before fetching anything.
-  const probe = await run([
-    '-v',
-    '--simulate',
-    '--no-warnings',
-    'https://www.youtube.com/watch?v=aaaaaaaaaaa',
-  ]);
-  const potPluginLoaded = probe.includes('bgutil:http');
-
-  let potProviderReachable: boolean | null = null;
-  const base = potBaseUrl();
-  if (base) {
-    potProviderReachable = await fetch(base, { signal: AbortSignal.timeout(3000) })
-      // Any answer at all proves it is listening; the status does not matter.
-      .then(() => true)
-      .catch(() => false);
-  }
-
-  return { available: true, version, potPluginLoaded, potProviderReachable };
+  return { available: true, version: version.trim() || null };
 }
 
 /** Streams a direct file URL to disk, aborting if it grows past the configured cap. */
@@ -124,7 +84,6 @@ export async function downloadDirect(url: string, destBase: string): Promise<str
   return dest;
 }
 
-/** Downloads a hosted clip (Medal, Streamable, Twitch, YouTube, …) via yt-dlp. */
 /**
  * Turns yt-dlp stderr into one line worth reading in a log.
  *
@@ -135,11 +94,7 @@ function explainYtDlpFailure(code: number | null, stderr: string): string {
   const last = stderr.trim().split('\n').slice(-1)[0] ?? '';
 
   if (/confirm you.{0,3}re not a bot|Sign in to confirm/i.test(stderr)) {
-    return (
-      'YouTube refused this as a suspected bot — about the server IP, not the URL. Update ' +
-      'yt-dlp (rebuild the image), then try ingest.extractorArgs in src/constants.ts, then ' +
-      'drop a cookies.txt into the data directory.'
-    );
+    return 'the site refused the download as suspected bot traffic from this server';
   }
   if (/Video unavailable|Private video|members-only/i.test(stderr)) {
     return `the video is not publicly available (${last})`;

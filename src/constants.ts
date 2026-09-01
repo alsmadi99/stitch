@@ -91,17 +91,15 @@ export const ingest: {
    */
   cookiesFilename: 'cookies.txt',
   /**
-   * Extra `--extractor-args` for yt-dlp.
+   * Extra `--extractor-args` for yt-dlp. Empty.
    *
-   * Points the bundled POT plugin at the `pot` sidecar from docker-compose, which is how
-   * YouTube's bot challenge gets answered. Outside compose that host does not resolve,
-   * the plugin logs a warning, and yt-dlp falls back to an unaided request — fine on a
-   * home connection, which is rarely challenged.
-   *
-   * If YouTube still refuses, append a player client, e.g.
-   * `youtube:player_client=tv,web_safari`, or drop a cookies.txt into the data directory.
+   * YouTube refuses downloads from the deploy host as suspected bot traffic. A current
+   * yt-dlp, alternate player clients, and a PO-token provider sidecar were all tried and
+   * none cleared it; only account cookies would, and pointing a real Google account at a
+   * datacenter IP risks the account that owns the channel. Left empty rather than
+   * carrying a workaround that does not work.
    */
-  extractorArgs: 'youtubepot-bgutilhttp:base_url=http://pot:4416',
+  extractorArgs: '',
   /** Hamming distance below which two clips are "the same clip", out of 72 bits. */
   phashThreshold: 8,
   minFreeDiskMb: 3072,

@@ -31,27 +31,10 @@ async function main(): Promise<void> {
     'stitch starting',
   );
 
-  // Logged at startup because a link failure otherwise looks identical whether the
-  // binary is stale, the plugin is missing from the image, or the provider is down.
   if (config.ingest.allowLinks) {
     void ytdlpReport().then((r) => {
-      if (!r.available) {
-        logger.warn('yt-dlp is not installed — link clips will be skipped');
-        return;
-      }
-      logger.info(
-        {
-          version: r.version,
-          potPlugin: r.potPluginLoaded ? 'loaded' : 'MISSING — image needs rebuilding',
-          potProvider:
-            r.potProviderReachable === null
-              ? 'not configured'
-              : r.potProviderReachable
-                ? 'reachable'
-                : 'UNREACHABLE',
-        },
-        'yt-dlp ready',
-      );
+      if (r.available) logger.info({ version: r.version }, 'yt-dlp ready for link clips');
+      else logger.warn('yt-dlp is not installed — link clips will be skipped');
     });
   }
 

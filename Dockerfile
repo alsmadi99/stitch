@@ -28,12 +28,6 @@ FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# The yt-dlp plugin that answers YouTube's "prove you are not a bot" challenge. It
-# talks to the `pot` sidecar over HTTP; with that service absent it logs a warning and
-# yt-dlp carries on unaided, so this is safe to ship either way.
-# Pinned: a plugin that changes under you breaks downloads at an unrelated moment.
-ARG POT_PLUGIN_VERSION=1.3.2
-
 # Distro ffmpeg rather than the bundled ffmpeg-static binary: the static Linux build
 # ships without libfreetype, so it has no drawtext filter and every thumbnail label
 # fails. Debian's build has it. fonts-dejavu-core supplies the TTF it renders with.
@@ -43,9 +37,6 @@ RUN apt-get update \
        ca-certificates ffmpeg fonts-dejavu-core gosu curl \
   && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o /usr/local/bin/yt-dlp \
   && chmod +x /usr/local/bin/yt-dlp \
-  && mkdir -p /etc/yt-dlp/plugins \
-  && curl -fsSL "https://github.com/Brainicism/bgutil-ytdlp-pot-provider/releases/download/${POT_PLUGIN_VERSION}/bgutil-ytdlp-pot-provider.zip" \
-       -o /etc/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip \
   && apt-get purge -y curl && apt-get autoremove -y \
   && rm -rf /var/lib/apt/lists/*
 

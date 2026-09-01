@@ -8,6 +8,12 @@ const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.webm', '.mkv', '.m4v', '.avi
  * Hosts yt-dlp handles well and that people actually post clips from. Deliberately
  * excludes image hosts like imgur — a link there is far more often a screenshot, and
  * every one would cost a download and a probe before being thrown away.
+ *
+ * YouTube is listed but currently refuses downloads from the deploy host, which it reads
+ * as bot traffic. Those links are ingested and then rejected, which costs a yt-dlp call
+ * and leaves a rejected row — harmless, and it starts working again by itself if the
+ * host's address stops being challenged. Drop a cookies.txt into the data directory to
+ * force the issue.
  */
 const LINK_HOSTS = [
   'medal.tv',
