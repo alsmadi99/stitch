@@ -145,8 +145,8 @@ React with ❌ on any clip and it leaves the queue — it will not appear in thi
 any later one. The bot swaps its ✅ for 🚫 so the state is visible in the channel.
 Remove the reaction to put it back.
 
-`VETO_ALLOWED` decides who it obeys. `ADMIN_USER_IDS` always works; the setting only
-widens the circle.
+`VETO_ALLOWED` in `src/constants.ts` decides who it obeys. `ADMIN_USER_IDS` always
+works; the setting only widens the circle.
 
 | `VETO_ALLOWED` | you | a mod with Manage Server | the clip's author | anyone else |
 | --- | --- | --- | --- | --- |
@@ -168,7 +168,7 @@ one — so the bot decides who it listens to and ignores the rest.
 2. **SHA-256 of the bytes.** Catches the same file reposted verbatim.
 3. **Perceptual fingerprint.** Five frames sampled at 10/30/50/70/90% of the clip, each
    reduced to a 64-bit dHash. Two clips match when their mean Hamming distance is under
-   `PHASH_THRESHOLD` (default 8).
+   `phashThreshold` in `src/constants.ts` (default 8).
 
 Layer 3 is the one that earns its keep: it catches a clip re-uploaded through Medal, or
 trimmed and recompressed by a different capture tool. Measured on synthetic footage, a
@@ -316,20 +316,32 @@ A rejected video fails identically forever, so retrying it only burns quota.
 
 ## Configuration
 
-Every option lives in `.env`; `.env.example` documents all of them. The ones you are
-most likely to touch:
+Configuration is split in two, on one rule: **`.env` is for things two installations
+disagree about — secrets, ids, and what the host can afford. Everything else lives in
+`src/constants.ts`.** That keeps `.env` down to about thirty lines instead of sixty.
+
+`.env.example` documents every variable. The ones you are most likely to touch:
 
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `REEL_MAX_CLIPS` | `20` | Threshold that fires a reel immediately |
 | `REEL_CRON` | `0 18 * * 0` | Sunday 18:00, honours `TZ` |
 | `OUTPUT_WIDTH` / `OUTPUT_HEIGHT` | `1920`/`1080` | 720p halves memory and encode time |
-| `STITCH_BATCH` | `4` | The memory dial |
+| `OUTPUT_FPS` | `30` | 60 doubles encode time; memory is unaffected |
 | `MAX_CLIP_SECONDS` | `60` | Longer clips are trimmed |
-| `PHASH_THRESHOLD` | `8` | Raise to catch more duplicates |
+| `FFMPEG_THREADS` | `0` | 0 = all cores; set it on a shared host |
 | `YOUTUBE_AUTO_PUBLISH` | `false` | `true` uploads at `YOUTUBE_PRIVACY` |
+| `LINK_ALLOWED_USER_IDS` | empty | Empty means anyone may post a link |
+
+In `src/constants.ts`, edit and rebuild:
+
+| Setting | Default | Notes |
+| --- | --- | --- |
 | `VETO_ALLOWED` | `owner` | Who the ❌ reaction obeys |
-| `MAX_PENDING_UPLOADS` | `3` | Built reels allowed to await quota |
+| `ingest.phashThreshold` | `8` | Raise to catch more duplicates |
+| `ingest.maxLinkBytes` | 60MB | Cap for links; attachments use `maxDownloadBytes` |
+| `ingest.extractorArgs` | empty | yt-dlp `--extractor-args`, if YouTube blocks you |
+| `youtube.tags` / `hashtags` | a gaming set | Your channel's SEO terms |
 
 ---
 
@@ -338,6 +350,7 @@ most likely to touch:
 ```
 src/
   config.ts      env parsing and validation, creates data dirs
+  constants.ts   settings that are decisions, not deployment details
   pipeline.ts    select clips → compile → upload → announce, with the run lock
   drain.ts       full-history backfill driven into 20-clip reels
   jobs.ts        one-slot job queue so long runs live in the bot, not a terminal

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import * as K from './constants.js';
 
 const bool = (def: boolean) =>
   z
@@ -45,57 +46,20 @@ const schema = z.object({
   ANNOUNCE_CHANNEL_ID: str(),
   ADMIN_ROLE_IDS: csv(),
   ADMIN_USER_IDS: csv(),
-  REJECT_REACTION: csv(['❌', '✖️', '❎']),
-  VETO_ALLOWED: z
-    .string()
-    .optional()
-    .transform((v) => (v === undefined || v.trim() === '' ? 'owner' : v.trim()))
-    .pipe(z.enum(['owner', 'admins', 'authors'])),
 
   REEL_MAX_CLIPS: num(20),
-  REEL_MIN_CLIPS: num(5),
   REEL_CRON: str('0 18 * * 0'),
 
+  // Host-shaped: these are the knobs that depend on the machine, not on taste.
   OUTPUT_WIDTH: num(1920),
   OUTPUT_HEIGHT: num(1080),
   OUTPUT_FPS: num(30),
-  TRANSITION_DURATION: num(0.5),
-  TRANSITIONS: csv(['fade', 'wipeleft', 'slideup', 'circleopen', 'dissolve']),
   MAX_CLIP_SECONDS: num(60),
-  MIN_CLIP_SECONDS: num(2),
-  TITLE_CARDS: bool(false),
-  TITLE_CARD_SECONDS: num(3),
-  FONT_FILE: str(),
-  X264_PRESET: str('veryfast'),
-  X264_CRF: num(20),
   FFMPEG_THREADS: num(0),
-  STITCH_BATCH: num(4),
 
-  THUMBNAIL_LABEL: str('GAMING CLIPS'),
-  THUMBNAIL_ACCENT: str('0xE62117'),
-
-  MAX_DOWNLOAD_BYTES: num(209_715_200),
   ALLOW_LINKS: bool(true),
-  /**
-   * Who may have a link fetched on their behalf. Empty means anyone in the channel.
-   *
-   * A link costs a yt-dlp run against a third-party site, which is a far bigger lever
-   * than posting a file — so it is worth being able to hand it to a few people only.
-   */
+  /** Who may have a link fetched on their behalf. Empty means anyone in the channel. */
   LINK_ALLOWED_USER_IDS: csv(),
-  /**
-   * Size cap for links specifically, separate from `MAX_DOWNLOAD_BYTES`.
-   *
-   * A Discord upload is already capped by Discord. A YouTube link is not: the same URL
-   * can be a 30-second clip or a three-hour VOD, and only the cap stops the latter.
-   */
-  MAX_LINK_BYTES: num(62_914_560),
-  PHASH_THRESHOLD: num(8),
-  MIN_FREE_DISK_MB: num(2048),
-  INGEST_CONCURRENCY: num(2),
-  BACKFILL_MAX_REELS: num(0),
-  MAX_PENDING_UPLOADS: num(3),
-  BACKFILL_AUTO_CONTINUE: bool(true),
 
   YOUTUBE_CLIENT_ID: str(),
   YOUTUBE_CLIENT_SECRET: str(),
@@ -106,57 +70,8 @@ const schema = z.object({
     .transform((v) => (v === undefined || v.trim() === '' ? 'private' : v.trim()))
     .pipe(z.enum(['private', 'unlisted', 'public'])),
   YOUTUBE_AUTO_PUBLISH: bool(false),
-  YOUTUBE_TITLE_TEMPLATE: str('Discord Gaming Clips #{n} | CS2, Rocket League, LoL & More'),
-  YOUTUBE_GAMES: csv([
-    'CS2',
-    'Rocket League',
-    'League of Legends',
-    'Rust',
-    'Valorant',
-    'Fortnite',
-    'GTA V',
-    'Minecraft',
-    'Apex Legends',
-    'Call of Duty',
-  ]),
-  YOUTUBE_HASHTAGS: csv([
-    'gaming',
-    'funny',
-    'clips',
-    'arabic',
-    'cs2',
-    'rocketleague',
-    'leagueoflegends',
-    'rust',
-    'valorant',
-    'fortnite',
-    'gameplay',
-    'montage',
-    'fails',
-    'highlights',
-  ]),
-  YOUTUBE_DESCRIPTION: str(),
-  YOUTUBE_TAGS: csv([
-    'gaming clips',
-    'funny gaming moments',
-    'variety gaming',
-    'cs2 clips',
-    'rocket league clips',
-    'league of legends clips',
-    'rust clips',
-    'gaming montage',
-    'discord clips',
-    'gaming highlights',
-    'arabic gaming',
-  ]),
-  YOUTUBE_CATEGORY_ID: str('20'),
   YOUTUBE_PLAYLIST_ID: str(),
   YOUTUBE_PLAYLIST_TITLE: str(),
-  YOUTUBE_PLAYLIST_PRIVACY: z
-    .string()
-    .optional()
-    .transform((v) => (v === undefined || v.trim() === '' ? 'public' : v.trim()))
-    .pipe(z.enum(['private', 'unlisted', 'public'])),
 
   HTTP_PORT: num(3000),
   LOG_LEVEL: str('info'),
@@ -185,47 +100,47 @@ export const config = {
     announceChannelId: env.ANNOUNCE_CHANNEL_ID || env.CLIPS_CHANNEL_ID,
     adminRoleIds: env.ADMIN_ROLE_IDS,
     adminUserIds: env.ADMIN_USER_IDS,
-    rejectReactions: env.REJECT_REACTION,
-    vetoAllowed: env.VETO_ALLOWED,
+    rejectReactions: K.REJECT_REACTIONS,
+    vetoAllowed: K.VETO_ALLOWED,
   },
   trigger: {
     maxClips: env.REEL_MAX_CLIPS,
-    minClips: env.REEL_MIN_CLIPS,
+    minClips: K.REEL_MIN_CLIPS,
     cron: env.REEL_CRON,
   },
   video: {
     width: env.OUTPUT_WIDTH,
     height: env.OUTPUT_HEIGHT,
     fps: env.OUTPUT_FPS,
-    transitionDuration: env.TRANSITION_DURATION,
-    transitions: env.TRANSITIONS,
+    transitionDuration: K.video.transitionDuration,
+    transitions: [...K.video.transitions],
     maxClipSeconds: env.MAX_CLIP_SECONDS,
-    minClipSeconds: env.MIN_CLIP_SECONDS,
-    titleCards: env.TITLE_CARDS,
-    titleCardSeconds: env.TITLE_CARD_SECONDS,
-    fontFile: env.FONT_FILE || undefined,
-    preset: env.X264_PRESET,
-    crf: env.X264_CRF,
+    minClipSeconds: K.video.minClipSeconds,
+    titleCards: K.video.titleCards,
+    titleCardSeconds: K.video.titleCardSeconds,
+    fontFile: K.video.fontFile || undefined,
+    preset: K.video.preset,
+    crf: K.video.crf,
     threads: env.FFMPEG_THREADS,
-    stitchBatch: Math.max(2, env.STITCH_BATCH),
   },
   thumbnail: {
-    label: env.THUMBNAIL_LABEL,
-    // ffmpeg accepts #RRGGBB, but 0x form avoids any ambiguity inside a filtergraph.
-    accent: env.THUMBNAIL_ACCENT.replace(/^#/, '0x'),
+    label: K.thumbnail.label,
+    accent: K.thumbnail.accent,
   },
   ingest: {
-    maxDownloadBytes: env.MAX_DOWNLOAD_BYTES,
+    maxDownloadBytes: K.ingest.maxDownloadBytes,
     allowLinks: env.ALLOW_LINKS,
     linkAllowedUserIds: env.LINK_ALLOWED_USER_IDS,
-    maxLinkBytes: env.MAX_LINK_BYTES,
-    phashThreshold: env.PHASH_THRESHOLD,
-    minFreeDiskMb: env.MIN_FREE_DISK_MB,
-    concurrency: Math.max(1, env.INGEST_CONCURRENCY),
+    maxLinkBytes: K.ingest.maxLinkBytes,
+    ytdlpCookiesFile: path.join(dataDir, K.ingest.cookiesFilename),
+    ytdlpExtractorArgs: K.ingest.extractorArgs,
+    phashThreshold: K.ingest.phashThreshold,
+    minFreeDiskMb: K.ingest.minFreeDiskMb,
+    concurrency: K.ingest.concurrency,
     // 0 means unlimited: keep building until something else says stop.
-    backfillMaxReels: env.BACKFILL_MAX_REELS > 0 ? env.BACKFILL_MAX_REELS : Number.POSITIVE_INFINITY,
-    maxPendingUploads: Math.max(1, env.MAX_PENDING_UPLOADS),
-    backfillAutoContinue: env.BACKFILL_AUTO_CONTINUE,
+    backfillMaxReels: K.ingest.backfillMaxReels > 0 ? K.ingest.backfillMaxReels : Number.POSITIVE_INFINITY,
+    maxPendingUploads: K.ingest.maxPendingUploads,
+    backfillAutoContinue: K.ingest.backfillAutoContinue,
   },
   youtube: {
     clientId: env.YOUTUBE_CLIENT_ID,
@@ -233,15 +148,15 @@ export const config = {
     refreshToken: env.YOUTUBE_REFRESH_TOKEN,
     privacy: env.YOUTUBE_PRIVACY,
     autoPublish: env.YOUTUBE_AUTO_PUBLISH,
-    titleTemplate: env.YOUTUBE_TITLE_TEMPLATE,
-    games: env.YOUTUBE_GAMES,
-    hashtags: env.YOUTUBE_HASHTAGS,
-    description: env.YOUTUBE_DESCRIPTION,
-    tags: env.YOUTUBE_TAGS,
-    categoryId: env.YOUTUBE_CATEGORY_ID,
+    titleTemplate: K.youtube.titleTemplate,
+    games: [...K.youtube.games],
+    hashtags: [...K.youtube.hashtags],
+    description: K.youtube.description,
+    tags: [...K.youtube.tags],
+    categoryId: K.youtube.categoryId,
     playlistId: env.YOUTUBE_PLAYLIST_ID,
     playlistTitle: env.YOUTUBE_PLAYLIST_TITLE,
-    playlistPrivacy: env.YOUTUBE_PLAYLIST_PRIVACY,
+    playlistPrivacy: K.youtube.playlistPrivacy,
     enabled: Boolean(env.YOUTUBE_CLIENT_ID && env.YOUTUBE_CLIENT_SECRET && env.YOUTUBE_REFRESH_TOKEN),
   },
   paths: {

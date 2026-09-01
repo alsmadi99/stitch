@@ -67,7 +67,7 @@ try {
   const peak = estimatedStitchPeakMb();
   const nodeOverhead = 250;
   const detail =
-    `${config.video.width}x${config.video.height}, STITCH_BATCH=${config.video.stitchBatch} ` +
+    `${config.video.width}x${config.video.height}, ${config.video.fps}fps ` +
     `-> ~${peak}MB for ffmpeg + ~${nodeOverhead}MB for the bot` +
     (limit ? `, container limit ${limit}MB` : ', no container limit');
 

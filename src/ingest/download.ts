@@ -80,8 +80,21 @@ export async function downloadViaYtDlp(
     'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
     '-o',
     `${destBase}.%(ext)s`,
-    url,
   ];
+
+  // YouTube answers datacenter IPs with "Sign in to confirm you're not a bot". A cookie
+  // jar is what clears it; which player client also works changes often enough that it
+  // has to be configurable rather than pinned here.
+  const cookies = config.ingest.ytdlpCookiesFile;
+  if (cookies) {
+    if (fs.existsSync(cookies)) args.push('--cookies', cookies);
+    else logger.warn({ cookies }, 'YTDLP_COOKIES_FILE is set but the file does not exist');
+  }
+  if (config.ingest.ytdlpExtractorArgs) {
+    args.push('--extractor-args', config.ingest.ytdlpExtractorArgs);
+  }
+
+  args.push(url);
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn(YTDLP, args, { windowsHide: true });

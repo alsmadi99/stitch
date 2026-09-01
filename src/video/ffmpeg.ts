@@ -191,7 +191,7 @@ function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunRes
           `${bin} was killed by ${signal} after ${elapsed}s with no error output ` +
           `(${facts}). ` +
           (confirmedOom
-            ? 'The kernel OOM counter confirms it ran out of memory — lower STITCH_BATCH, ' +
+            ? 'The kernel OOM counter confirms it ran out of memory — lower OUTPUT_HEIGHT, ' +
               'set OUTPUT_HEIGHT=720, or raise the container memory limit.'
             : 'No OOM was recorded against this container, so look for an external kill: ' +
               'a redeploy, a manual stop, or the host itself being out of memory.');
