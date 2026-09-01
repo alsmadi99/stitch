@@ -1,5 +1,6 @@
 import { config } from './config.js';
 import { logger } from './logger.js';
+import { ytdlpReport } from './ingest/download.js';
 import { client, login } from './discord/client.js';
 import { registerCollector } from './discord/collector.js';
 import { deployCommands, registerCommands } from './discord/commands.js';
@@ -29,6 +30,30 @@ async function main(): Promise<void> {
     },
     'stitch starting',
   );
+
+  // Logged at startup because a link failure otherwise looks identical whether the
+  // binary is stale, the plugin is missing from the image, or the provider is down.
+  if (config.ingest.allowLinks) {
+    void ytdlpReport().then((r) => {
+      if (!r.available) {
+        logger.warn('yt-dlp is not installed — link clips will be skipped');
+        return;
+      }
+      logger.info(
+        {
+          version: r.version,
+          potPlugin: r.potPluginLoaded ? 'loaded' : 'MISSING — image needs rebuilding',
+          potProvider:
+            r.potProviderReachable === null
+              ? 'not configured'
+              : r.potProviderReachable
+                ? 'reachable'
+                : 'UNREACHABLE',
+        },
+        'yt-dlp ready',
+      );
+    });
+  }
 
   if (!config.youtube.enabled) {
     logger.warn('YouTube is not configured — reels will be compiled locally only');

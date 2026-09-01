@@ -25,6 +25,71 @@ export async function hasYtDlp(): Promise<boolean> {
 
 export class DownloadError extends Error {}
 
+export interface YtDlpReport {
+  available: boolean;
+  version: string | null;
+  /** Whether the bundled PO-token plugin was actually loaded from the image. */
+  potPluginLoaded: boolean;
+  /** Whether the provider named in `extractorArgs` answers. Null when none is set. */
+  potProviderReachable: boolean | null;
+}
+
+/** The `base_url=` value out of the configured extractor args, if there is one. */
+function potBaseUrl(): string | null {
+  const marker = 'base_url=';
+  const at = config.ingest.ytdlpExtractorArgs.indexOf(marker);
+  if (at === -1) return null;
+  const rest = config.ingest.ytdlpExtractorArgs.slice(at + marker.length);
+  return rest.split(' ')[0]?.split(',')[0] || null;
+}
+
+/**
+ * What yt-dlp can actually do in this container, answered without a network call.
+ *
+ * Every YouTube failure so far has had three candidate causes — stale binary, missing
+ * plugin, unreachable provider — and no way to tell them apart from the outside. Asking
+ * yt-dlp to load a deliberately invalid video id makes it print its plugin state and
+ * stop, which distinguishes all three in about a second.
+ */
+export async function ytdlpReport(): Promise<YtDlpReport> {
+  if (!(await hasYtDlp())) {
+    return { available: false, version: null, potPluginLoaded: false, potProviderReachable: null };
+  }
+
+  const run = (args: string[]): Promise<string> =>
+    new Promise((resolve) => {
+      const child = spawn(YTDLP, args, { windowsHide: true });
+      let out = '';
+      child.stdout.on('data', (d: Buffer) => (out += d.toString()));
+      child.stderr.on('data', (d: Buffer) => (out += d.toString()));
+      child.on('error', () => resolve(''));
+      child.on('close', () => resolve(out));
+    });
+
+  const version = (await run(['--version'])).trim() || null;
+
+  // An 11-character id that cannot exist: the extractor loads, prints what it has, and
+  // fails before fetching anything.
+  const probe = await run([
+    '-v',
+    '--simulate',
+    '--no-warnings',
+    'https://www.youtube.com/watch?v=aaaaaaaaaaa',
+  ]);
+  const potPluginLoaded = probe.includes('bgutil:http');
+
+  let potProviderReachable: boolean | null = null;
+  const base = potBaseUrl();
+  if (base) {
+    potProviderReachable = await fetch(base, { signal: AbortSignal.timeout(3000) })
+      // Any answer at all proves it is listening; the status does not matter.
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  return { available: true, version, potPluginLoaded, potProviderReachable };
+}
+
 /** Streams a direct file URL to disk, aborting if it grows past the configured cap. */
 export async function downloadDirect(url: string, destBase: string): Promise<string> {
   const max = config.ingest.maxDownloadBytes;
