@@ -19,6 +19,42 @@ const LINK_HOSTS = [
   'outplayed.tv',
 ];
 
+/**
+ * Reduces a link to one canonical form per video.
+ *
+ * The same YouTube video has at least four URLs — `youtu.be/ID`, `watch?v=ID`,
+ * `shorts/ID`, and any of them carrying `?si=` or `&feature=` — and posting two of them
+ * created two clips, two downloads, and two rows that only the perceptual hash could
+ * later reconcile. Dedupe keys on the URL string, so the string has to be stable.
+ *
+ * Anything not recognised is returned with tracking parameters stripped and nothing else
+ * changed; guessing at unknown hosts is how a working link gets mangled.
+ */
+export function canonicalizeUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return raw;
+  }
+
+  const host = url.hostname.replace(/^www\./, '');
+
+  if (host === 'youtu.be' || host.endsWith('youtube.com')) {
+    const id =
+      host === 'youtu.be'
+        ? url.pathname.slice(1)
+        : (url.searchParams.get('v') ?? url.pathname.replace(/^\/(shorts|embed|live)\//, ''));
+    // 11 characters, and never a path with further segments.
+    if (/^[\w-]{11}$/.test(id)) return `https://www.youtube.com/watch?v=${id}`;
+  }
+
+  for (const junk of ['si', 'feature', 'utm_source', 'utm_medium', 'utm_campaign', 'fbclid']) {
+    url.searchParams.delete(junk);
+  }
+  return url.toString();
+}
+
 const URL_RE = /https?:\/\/[^\s<>|]+/gi;
 
 function isSupportedHost(raw: string): boolean {
@@ -73,8 +109,12 @@ export function extractCandidates(message: Message): Candidate[] {
     const texts = [message.content, ...message.embeds.map((e) => e.url ?? '')];
     for (const text of texts) {
       for (const match of text.match(URL_RE) ?? []) {
-        const url = match.replace(/[),.]+$/, '');
-        if (seen.has(url) || !isSupportedHost(url)) continue;
+        const trimmed = match.replace(/[),.]+$/, '');
+        if (!isSupportedHost(trimmed)) continue;
+        // Canonical before the seen-check, so two spellings of one video collapse here
+        // rather than becoming two clips.
+        const url = canonicalizeUrl(trimmed);
+        if (seen.has(url)) continue;
         seen.add(url);
         out.push({ ...base, sourceType: 'link', sourceUrl: url });
       }
