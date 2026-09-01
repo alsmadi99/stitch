@@ -25,10 +25,31 @@
 # For half the memory and roughly twice the speed, uncomment the 720p block.
 
 services:
+  # Answers YouTube's "confirm you're not a bot" challenge, which a datacenter IP gets
+  # asked constantly and a home connection almost never does. It mints a proof-of-origin
+  # token that yt-dlp attaches to its requests; the plugin that talks to it is baked into
+  # the stitch image.
+  #
+  # No ports published: it is reachable only from the compose network, which is what you
+  # want — it is an unauthenticated HTTP service.
+  pot:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: stitch-pot
+    restart: unless-stopped
+    expose:
+      - '4416'
+    # Small and idle most of the time; this keeps it from ever competing with ffmpeg.
+    mem_limit: 512m
+    cpus: 0.5
+
   stitch:
     build: .
     container_name: stitch
     restart: unless-stopped
+    # Only for ordering. yt-dlp degrades to an unaided request if the provider is down,
+    # so this is not a hard dependency.
+    depends_on:
+      - pot
     # Dokploy writes the variables from its Environment tab into a .env beside this
     # file, so the same compose works locally and there.
     env_file: .env

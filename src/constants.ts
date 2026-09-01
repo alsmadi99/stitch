@@ -91,14 +91,17 @@ export const ingest: {
    */
   cookiesFilename: 'cookies.txt',
   /**
-   * Extra `--extractor-args` for yt-dlp. Empty by default.
+   * Extra `--extractor-args` for yt-dlp.
    *
-   * If YouTube starts refusing downloads, try a different player client here, e.g.
-   * `youtube:player_client=tv,web_safari`. Which one works moves around as YouTube
-   * changes things, so there is no value worth hard-coding — but update yt-dlp first,
-   * which fixes it more often than this does.
+   * Points the bundled POT plugin at the `pot` sidecar from docker-compose, which is how
+   * YouTube's bot challenge gets answered. Outside compose that host does not resolve,
+   * the plugin logs a warning, and yt-dlp falls back to an unaided request — fine on a
+   * home connection, which is rarely challenged.
+   *
+   * If YouTube still refuses, append a player client, e.g.
+   * `youtube:player_client=tv,web_safari`, or drop a cookies.txt into the data directory.
    */
-  extractorArgs: '',
+  extractorArgs: 'youtubepot-bgutilhttp:base_url=http://pot:4416',
   /** Hamming distance below which two clips are "the same clip", out of 72 bits. */
   phashThreshold: 8,
   minFreeDiskMb: 3072,
